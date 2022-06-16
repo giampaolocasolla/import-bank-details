@@ -1,0 +1,65 @@
+curve:
+  import:
+  columns_old:
+    - Date (YYYY-MM-DD as UTC)
+    - Merchant
+    - Txn Amount (Funding Card)
+    - Card Name
+    - Category
+  columns_new:
+    - Day
+    - Expense name
+    - Amount
+    - Bank
+    - Comment
+  Day: "%Y-%m-%d"
+ing:
+  import:
+    sep: ";"
+  columns_old:
+    - Date
+    - Bénéficiaire
+    - Montant
+    - Bank
+    - Communication
+  columns_new:
+    - Day
+    - Expense name
+    - Amount
+    - Bank
+    - Comment
+  Day: "%d/%m/%Y"
+n26:
+  import:
+  columns_old:
+    - Data
+    - Beneficiario
+    - Importo (EURO)
+    - Bank
+    - Riferimento pagamento
+  columns_new:
+    - Day
+    - Expense name
+    - Amount
+    - Bank
+    - Comment
+  Remove:
+    - CRV*
+  Day: "%Y-%m-%d"
+revolut:
+  import:
+  columns_old:
+    - Started Date
+    - Description
+    - Amount
+    - Bank
+    - Type
+  columns_new:
+    - Day
+    - Expense name
+    - Amount
+    - Bank
+    - Comment
+  Remove:
+    - Crv*
+  Day: "%Y-%m-%d %H:%M:%S"
