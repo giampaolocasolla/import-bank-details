@@ -15,10 +15,12 @@ def main():
     df = None
 
     for file_key, file_value in file_data.items():
-        if config[file_key]['import']:
+        try:
             df_temp = pd.read_csv(file_value, **config[file_key]['import'])
-        else:
+        except TypeError:
             df_temp = pd.read_csv(file_value)
+        except UnicodeDecodeError:
+            df_temp = pd.read_excel(file_value)
         
         if 'Bank' in config[file_key]['columns_old']:
             df_temp['Bank'] = file_key
@@ -37,6 +39,8 @@ def main():
     df['Day'] = df['Day'].dt.round('D')
 
     df = df.sort_values(by=['Day', 'Expense name', 'Amount'])
+
+    df['Amount'] = -df['Amount']
 
     filename = f"{df['Day'].max().strftime('%Y-%m-%d')}_{'-'.join(config.keys())}.xlsx"
     df.to_excel(os.path.join('output', filename), index=False)
