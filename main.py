@@ -43,6 +43,9 @@ def main():
     df['Amount'] = -df['Amount']
 
     filename = f"{df['Day'].max().strftime('%Y-%m-%d')}_{'-'.join(config.keys())}.xlsx"
+    
+    df['Day'] = df['Day'].dt.strftime('%d/%m/%Y')
+
     df.to_excel(os.path.join('output', filename), index=False)
 
 if __name__ == '__main__':
