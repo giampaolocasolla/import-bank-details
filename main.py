@@ -16,9 +16,10 @@ def main():
 
     for file_key, file_value in file_data.items():
         try:
-            df_temp = pd.read_csv(file_value, **config[file_key]['import'])
-        except TypeError:
-            df_temp = pd.read_csv(file_value)
+            if config[file_key]['import']:
+                df_temp = pd.read_csv(file_value, **config[file_key]['import'])
+            else:
+                df_temp = pd.read_csv(file_value)
         except UnicodeDecodeError:
             df_temp = pd.read_excel(file_value)
         
