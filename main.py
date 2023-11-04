@@ -110,8 +110,8 @@ def main():
     # Convert the 'Amount' to a negative value to indicate expense
     df['Amount'] = -df['Amount']
 
-    # Create a filename for the output file based on the latest date in the data
-    filename = f"{df['Day'].max().strftime('%Y-%m-%d')}_{'-'.join(config.keys())}.xlsx"
+    # Create a filename for the output file based on the latest date in the data and the folders_data
+    filename = f"{df['Day'].max().strftime('%Y-%m-%d')}_{'-'.join(folders_data)}.xlsx"
     
     # Format the 'Day' column for final output
     df['Day'] = df['Day'].dt.strftime('%d/%m/%Y')
