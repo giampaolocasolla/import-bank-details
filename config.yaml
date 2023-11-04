@@ -28,6 +28,8 @@ ing:
     - Amount
     - Bank
     - Comment
+  Remove:
+    - Giampaolo Casolla
   Day: "%d/%m/%Y"
 n26:
   import:
@@ -43,8 +45,6 @@ n26:
     - Amount
     - Bank
     - Comment
-  Remove:
-    - CRV*
   Day: "%Y-%m-%d"
 revolut:
   import:
@@ -61,5 +61,5 @@ revolut:
     - Bank
     - Comment
   Remove:
-    - Crv*
+    - To EUR
   Day: "%Y-%m-%d %H:%M:%S"
