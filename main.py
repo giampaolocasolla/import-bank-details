@@ -37,7 +37,7 @@ def main():
 
         
         df = pd.concat([df, df_temp], ignore_index=True)
-    df['Day'] = df['Day'].dt.round('D')
+    df['Day'] = df['Day'].dt.floor('D')
 
     df = df.sort_values(by=['Day', 'Expense name', 'Amount'])
 
