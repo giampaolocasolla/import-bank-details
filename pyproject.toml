@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "import-bank-details"
+version = "0.1.0"
+description = "Python script to import, merge, and export different bank statements together."
+authors = ["Giampaolo Casolla <giampaolocasolla@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+pandas = "^2.2.2"
+PyYAML = "^6.0.2"
+openpyxl = "^3.1.5"
+
+[tool.poetry.dev-dependencies]
+pytest = "^6.2.4"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
