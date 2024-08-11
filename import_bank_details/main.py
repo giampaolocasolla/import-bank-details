@@ -4,12 +4,16 @@ import yaml
 import pandas as pd
 import logging
 from logging.handlers import RotatingFileHandler
+from typing import Dict, List, Optional
 
 
-def setup_logging():
+def setup_logging() -> logging.Logger:
     """
     Set up logging configuration to include timestamps and display logs in the terminal.
     A rotating file handler is also used to limit the log file size and keep backups.
+
+    Returns:
+        logging.Logger: Configured logger instance.
     """
     global logger
     logger = logging.getLogger(__name__)
@@ -31,8 +35,10 @@ def setup_logging():
     logger.addHandler(file_handler)
     logger.addHandler(stream_handler)
 
+    return logger
 
-def load_config(config_path):
+
+def load_config(config_path: str) -> Dict:
     """
     Load the configuration from the YAML file.
 
@@ -52,7 +58,7 @@ def load_config(config_path):
             raise
 
 
-def get_latest_files(data_dir):
+def get_latest_files(data_dir: str) -> Dict[str, str]:
     """
     Identify the most recently modified file in each data subfolder to process.
 
@@ -70,7 +76,7 @@ def get_latest_files(data_dir):
     return file_data
 
 
-def import_data(file_path, import_params=None):
+def import_data(file_path: str, import_params: Optional[Dict] = None) -> pd.DataFrame:
     """
     Import data from a file with specified parameters.
 
@@ -97,7 +103,7 @@ def import_data(file_path, import_params=None):
     return df
 
 
-def process_data(df, config, bank_name):
+def process_data(df: pd.DataFrame, config: Dict, bank_name: str) -> pd.DataFrame:
     """
     Process and clean the data according to the configuration.
 
@@ -132,7 +138,7 @@ def process_data(df, config, bank_name):
     return df
 
 
-def remove_unnecessary_expenses(df, remove_criteria):
+def remove_unnecessary_expenses(df: pd.DataFrame, remove_criteria: List[str]) -> pd.DataFrame:
     """
     Adjust the dataframe by removing rows based on 'remove_criteria' in 'Expense name' column,
     replacing NaN values with an empty string to avoid TypeError with bitwise NOT operator.
@@ -155,7 +161,7 @@ def remove_unnecessary_expenses(df, remove_criteria):
     return df[~mask]
 
 
-def save_to_excel(df, output_dir, folders_data):
+def save_to_excel(df: pd.DataFrame, output_dir: str, folders_data: List[str]) -> None:
     """
     Save the processed data to an Excel file in the output directory.
 
@@ -175,7 +181,7 @@ def save_to_excel(df, output_dir, folders_data):
     logger.info(f'Dataframe saved to Excel file {filename}.')
 
 
-def main():
+def main() -> None:
     """Main function to orchestrate the data import, processing, and export."""
     # Set up logging
     setup_logging()
@@ -215,7 +221,7 @@ def main():
         df['Amount'] = -df['Amount']
 
         # Save the processed data to an Excel file in the output directory
-        save_to_excel(df, 'output', file_data.keys())
+        save_to_excel(df, 'output', list(file_data.keys()))
 
 
 if __name__ == '__main__':
