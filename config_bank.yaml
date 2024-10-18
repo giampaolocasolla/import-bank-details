@@ -34,11 +34,11 @@ ing:
 n26:
   import:
   columns_old:
-    - Data
-    - Beneficiario
-    - Importo (EURO)
+    - Booking Date
+    - Partner Name
+    - Amount (EUR)
     - Bank
-    - Riferimento pagamento
+    - Payment Reference
   columns_new:
     - Day
     - Expense name
