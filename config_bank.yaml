@@ -8,7 +8,7 @@ curve:
     - Category
   columns_new:
     - Day
-    - Expense name
+    - Expense_name
     - Amount
     - Bank
     - Comment
@@ -24,7 +24,7 @@ ing:
     - Communication
   columns_new:
     - Day
-    - Expense name
+    - Expense_name
     - Amount
     - Bank
     - Comment
@@ -41,7 +41,7 @@ n26:
     - Payment Reference
   columns_new:
     - Day
-    - Expense name
+    - Expense_name
     - Amount
     - Bank
     - Comment
@@ -56,10 +56,11 @@ revolut:
     - Type
   columns_new:
     - Day
-    - Expense name
+    - Expense_name
     - Amount
     - Bank
     - Comment
   Remove:
     - To EUR
+    - Payment from Giampaolo Casolla
   Day: "%Y-%m-%d %H:%M:%S"

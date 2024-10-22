@@ -1,0 +1,7 @@
+llm:
+  model_name: "gpt-4o-mini"
+  temperature_base: 0.0
+  temperature_retry: 0.7
+  timeout: 180
+
+system_prompt: "You are an helpful assistant that classifies expenses into categories and subcategories."
