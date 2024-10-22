@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Set
 
 import pandas as pd
 from dotenv import load_dotenv
+from duckduckgo_search import DDGS
 from openai import OpenAI
 from pydantic import BaseModel
 
@@ -101,6 +102,40 @@ def create_nested_category_string(response_format: BaseModel) -> str:
     return categories_str
 
 
+def perform_online_search(expense_name: str, region: str = "de-de", max_results: int = 2) -> str:
+    """
+    Perform an online search using DuckDuckGo and return the search results as a string.
+
+    Args:
+        expense_name (str): The name of the expense to search for.
+        region (str, optional): The region to search in. Defaults to "de-de".
+        max_results (int, optional): The maximum number of search results to return. Defaults to 2.
+
+    Returns:
+        str: Concatenated search results or an error message if the search fails.
+    """
+    # List of texts to remove from the expense_name
+    texts_to_remove = ["SumUp  *", "PAYPAL *", "LSP*", "CRV*", "PAY.nl*", "UZR*"]
+
+    # Remove unwanted texts from the expense_name
+    for text in texts_to_remove:
+        expense_name = expense_name.replace(text, "")
+
+    # Strip extra whitespace after removal
+    expense_name = expense_name.strip()
+
+    try:
+        with DDGS() as ddgs:
+            search_results = list(ddgs.text(expense_name, region=region, max_results=max_results))
+            # Convert each search result dict to a JSON string
+            search_results_str = "\n".join([json.dumps(result, ensure_ascii=False) for result in search_results])
+            return search_results_str
+    except Exception as e:
+        logger.error(f"Online search failed: {str(e)}")
+        # Return a fallback message if the search fails
+        return "[Online search failed to retrieve additional information.]"
+
+
 def get_classification(
     expense_input: Dict[str, str],
     examples: List[Dict[str, Any]] = [],
@@ -109,6 +144,7 @@ def get_classification(
     temperature: float = config_llm["llm"]["temperature_base"],
     response_format: BaseModel = ExpenseOutput,
     include_categories_in_prompt: bool = False,
+    include_online_search: bool = False,
 ) -> BaseModel:
     """
     Get classification for an expense input using OpenAI's chat completion API.
@@ -121,6 +157,7 @@ def get_classification(
         temperature (float, optional): The temperature setting for the model. Defaults to the value from config_llm.
         response_format (BaseModel, optional): The expected response format. Defaults to ExpenseOutput.
         include_categories_in_prompt (bool, optional): If True, appends the category list to the system prompt.
+        include_online_search (bool, optional): If True, appends online search results to the user's message.
 
     Returns:
         BaseModel: The parsed response from the OpenAI API containing the classification.
@@ -141,7 +178,15 @@ def get_classification(
             ]
         )
 
-    messages.append({"role": "user", "content": json.dumps(expense_input)})
+    user_message_content = json.dumps(expense_input)
+
+    if include_online_search:
+        expense_name = expense_input.get("Expense_name", "")
+        if expense_name:
+            search_text = perform_online_search(expense_name)
+            user_message_content += f"\n\nAdditional Information from Online Search:\n{search_text}"
+
+    messages.append({"role": "user", "content": user_message_content})
 
     try:
         response = client.beta.chat.completions.parse(
@@ -165,6 +210,7 @@ def classify_expenses(
     temperature: float = config_llm["llm"]["temperature_base"],
     response_format: BaseModel = ExpenseOutput,
     include_categories_in_prompt: bool = False,
+    include_online_search: bool = False,
 ) -> pd.DataFrame:
     """
     Classify expenses in the given DataFrame using example data and OpenAI's language model.
@@ -181,6 +227,7 @@ def classify_expenses(
         temperature (float, optional): The temperature setting for the OpenAI model. Defaults to the value from config_llm.
         response_format (BaseModel, optional): The expected response format from the OpenAI model. Defaults to ExpenseOutput.
         include_categories_in_prompt (bool, optional): If True, appends the category list to the system prompt.
+        include_online_search (bool, optional): If True, appends online search results to the user's message.
 
     Returns:
         pd.DataFrame: A new DataFrame containing the original expense data along with
@@ -242,6 +289,7 @@ def classify_expenses(
                 temperature=temperature,
                 response_format=response_format,
                 include_categories_in_prompt=include_categories_in_prompt,
+                include_online_search=include_online_search,
             )
             classification_results.append(
                 {

@@ -156,6 +156,50 @@ def remove_unnecessary_expenses(df: pd.DataFrame, remove_criteria: List[str]) ->
     return df[~mask]
 
 
+def validate_example_structure(df: pd.DataFrame, df_examples: pd.DataFrame) -> None:
+    """
+    Validate that all columns in df are present in df_examples and have matching data types.
+
+    Args:
+        df (pd.DataFrame): The main DataFrame.
+        df_examples (pd.DataFrame): The example DataFrame to validate against.
+
+    Raises:
+        ValueError: If there are missing columns or data type mismatches.
+    """
+    # Check for missing columns
+    missing_cols = set(df.columns) - set(df_examples.columns)
+    if missing_cols:
+        missing_cols_str = ", ".join(sorted(missing_cols))
+        raise ValueError(
+            f"Example file structure does not match data.\n"
+            f"Missing Columns in Example File: {missing_cols_str}\n"
+            f"Expected Columns: {', '.join(sorted(df.columns))}\n"
+            f"Please ensure the example file includes all required columns."
+        )
+
+    # Check for data type mismatches
+    dtype_mismatch = {}
+    for col in df.columns:
+        if df[col].dtype != df_examples[col].dtype:
+            dtype_mismatch[col] = {"data_dtype": df[col].dtype, "example_dtype": df_examples[col].dtype}
+
+    if dtype_mismatch:
+        mismatch_details = ", ".join(
+            [
+                f"'{col}': data dtype is {details['data_dtype']}, " f"but example dtype is {details['example_dtype']}"
+                for col, details in dtype_mismatch.items()
+            ]
+        )
+        raise ValueError(
+            f"Example file column dtypes do not match data.\n"
+            f"Mismatched Columns: {mismatch_details}\n"
+            f"Please ensure that the example file has the correct data types for each column."
+        )
+
+    logger.info("Example file structure and data types are valid.")
+
+
 def save_to_excel(df: pd.DataFrame, output_dir: str, folders_data: List[str]) -> None:
     """
     Save the processed data to an Excel file in the output directory.
@@ -228,13 +272,20 @@ def main() -> None:
 
             # Process df_examples to ensure correct data types
             df_examples = process_examples(df_examples=df_examples)
+
+            try:
+                # Validate the example file structure and data types
+                validate_example_structure(df=df, df_examples=df_examples)
+            except ValueError as ve:
+                logger.error(f"Validation failed: {ve}")
+                raise
         else:
             logger.warning("No example file found. Classification may be less accurate.")
-            df_examples = pd.DataFrame()
+            df_examples = pd.DataFrame(columns=df.columns)
 
         # Classify the expenses with OpenAI
         logger.info("Classifying expenses with OpenAI.")
-        df = classify_expenses(df=df, df_examples=df_examples, include_categories_in_prompt=True)
+        df = classify_expenses(df=df, df_examples=df_examples, include_categories_in_prompt=True, include_online_search=True)
         logger.info("Classification complete.")
 
         # Save the processed data to an Excel file in the output directory

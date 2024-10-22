@@ -345,6 +345,25 @@ files = [
 ]
 
 [[package]]
+name = "duckduckgo-search"
+version = "6.3.2"
+description = "Search for words, documents, images, news, maps and text translation using the DuckDuckGo.com search engine."
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "duckduckgo_search-6.3.2-py3-none-any.whl", hash = "sha256:cd631275292460d590d1d496995d002bf2fe6db9752713fab17b9e95924ced98"},
+    {file = "duckduckgo_search-6.3.2.tar.gz", hash = "sha256:53dbf45f8749bfc67483eb9f281f2e722a5fe644d61c54ed9e551d26cb6bcbf2"},
+]
+
+[package.dependencies]
+click = ">=8.1.7"
+primp = ">=0.6.4"
+
+[package.extras]
+dev = ["mypy (>=1.11.1)", "pytest (>=8.3.1)", "pytest-asyncio (>=0.23.8)", "ruff (>=0.6.1)"]
+lxml = ["lxml (>=5.2.2)"]
+
+[[package]]
 name = "et-xmlfile"
 version = "1.1.0"
 description = "An implementation of lxml.xmlfile for the standard library"
@@ -1172,6 +1191,26 @@ pyyaml = ">=5.1"
 virtualenv = ">=20.10.0"
 
 [[package]]
+name = "primp"
+version = "0.6.4"
+description = "HTTP client that can impersonate web browsers, mimicking their headers and `TLS/JA3/JA4/HTTP2` fingerprints"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "primp-0.6.4-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:e627330c1f2b723b523dc2e47caacbc5b5d0cd51ca11583b42fb8cde4da60d7d"},
+    {file = "primp-0.6.4-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:e0cb7c05dd56c8b9741042fd568c0983fc19b0f3aa209a3940ecc04b4fd60314"},
+    {file = "primp-0.6.4-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a4adc200ccb39e130c478d8b1a94f43a5b359068c6cb65b7c848812f96d96992"},
+    {file = "primp-0.6.4-cp38-abi3-manylinux_2_34_aarch64.whl", hash = "sha256:0ebae2d3aa36b04028e4accf2609d31d2e6981659e8e2effb09ee8ba960192e1"},
+    {file = "primp-0.6.4-cp38-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:77f5fa5b34eaf251815622258419a484a2a9179dcbae2a1e702a254d91f613f1"},
+    {file = "primp-0.6.4-cp38-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:14cddf535cd2c4987412e90ca3ca35ae52cddbee6e0f0953d26b33a652a95692"},
+    {file = "primp-0.6.4-cp38-abi3-win_amd64.whl", hash = "sha256:96177ec2dadc47eaecbf0b22d2e93aeaf964a1be9a71e6e318d2ffb9e4242743"},
+    {file = "primp-0.6.4.tar.gz", hash = "sha256:0a3de63e46a50664bcdc76e7aaf7060bf8443698efa902864669c5fca0d1abdd"},
+]
+
+[package.extras]
+dev = ["certifi", "pytest (>=8.1.1)"]
+
+[[package]]
 name = "prompt-toolkit"
 version = "3.0.48"
 description = "Library for building powerful interactive command lines in Python"
@@ -1996,4 +2035,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11"
-content-hash = "db5952d0717fec56985ec856c97710abb0f0e8ab0e5cd9f36b47f0575ad01778"
+content-hash = "8f67b16b3dfb96f86499c7039b5049832b3338dd4333e4426170e5eaaa3a6980"
