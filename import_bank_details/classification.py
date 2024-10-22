@@ -115,7 +115,7 @@ def perform_online_search(expense_name: str, region: str = "de-de", max_results:
         str: Concatenated search results or an error message if the search fails.
     """
     # List of texts to remove from the expense_name
-    texts_to_remove = ["SumUp  *", "PAYPAL *", "LSP*", "CRV*", "PAY.nl*", "UZR*"]
+    texts_to_remove = ["SumUp  *", "PAYPAL *", "LSP*", "CRV*", "PAY.nl*", "UZR*", "luca "]
 
     # Remove unwanted texts from the expense_name
     for text in texts_to_remove:
