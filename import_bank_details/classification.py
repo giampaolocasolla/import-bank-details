@@ -142,7 +142,29 @@ class SearchCache:
 def perform_online_search(
     expense_name: str, region: str = "de-de", max_results: int = 2, cache_path: Optional[Path] = None
 ) -> str:
+    """
+    Search for expense details using DuckDuckGo with caching and rate limiting.
+
+    Args:
+        expense_name (str): Raw expense name to search for
+        region (str, optional): Region code for search results. Defaults to "de-de".
+        max_results (int, optional): Maximum number of search results. Defaults to 2.
+        cache_path (Optional[Path], optional): Custom path for cache file. Defaults to None.
+
+    Returns:
+        str: JSON-formatted search results string or error message.
+            Success: JSON string containing search results
+            Failure: Error message as string
+
+    Examples:
+        >>> perform_online_search("Coffee Shop Berlin")
+        '{"title": "Best Coffee Shops in Berlin", ...}'
+
+        >>> perform_online_search("INVALID", cache_path=Path("/tmp/cache"))
+        'No results found'
+    """
     search_cache = SearchCache()
+    logger.info(f"Starting search for expense: '{expense_name}'")
 
     # Clean input
     texts_to_remove = ["SumUp  *", "PAYPAL *", "LSP*", "CRV*", "PAY.nl*", "UZR*", "luca "]
@@ -152,6 +174,7 @@ def perform_online_search(
     cleaned_name = cleaned_name.strip()
 
     if not cleaned_name:
+        logger.warning(f"Invalid search term after cleaning: '{expense_name}'")
         return "Invalid search term"
 
     # Check cache
@@ -159,13 +182,17 @@ def perform_online_search(
     cache = search_cache.load_cache(cache_path)
 
     if cache_key in cache:
-        logger.info(f"Returning cached results for: {cleaned_name}")
+        logger.info(f"Cache hit for '{cleaned_name}'")
         return cache[cache_key]
+
+    logger.info(f"Cache miss for '{cleaned_name}', performing online search")
 
     # Implement exponential backoff
     for attempt in range(search_cache.max_retries):
         try:
             search_cache.rate_limit()
+            logger.debug(f"Search attempt {attempt + 1} for '{cleaned_name}'")
+
             with DDGS() as ddgs:
                 search_results = list(ddgs.text(cleaned_name, region=region, max_results=max_results))
 
@@ -174,15 +201,18 @@ def perform_online_search(
                     # Only cache successful results
                     cache[cache_key] = search_results_str
                     search_cache.save_cache(cache, cache_path)
+                    logger.info(f"Successfully found and cached {len(search_results)} results for '{cleaned_name}'")
                     return search_results_str
 
+                logger.warning(f"No results found for '{cleaned_name}'")
                 return "No results found"
 
         except Exception as e:
             delay = search_cache.initial_delay * (2**attempt)
-            logger.warning(f"Search attempt {attempt + 1} failed: {str(e)}. Retrying in {delay}s")
+            logger.warning(f"Search attempt {attempt + 1} failed for '{cleaned_name}': {str(e)}. Retrying in {delay}s")
             time.sleep(delay)
 
+    logger.error(f"Search failed after {search_cache.max_retries} attempts for '{cleaned_name}'")
     return "Online search failed after multiple attempts"
 
 
