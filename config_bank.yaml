@@ -34,7 +34,7 @@ ing:
 n26:
   import:
   columns_old:
-    - Booking Date
+    - Value Date
     - Partner Name
     - Amount (EUR)
     - Bank
