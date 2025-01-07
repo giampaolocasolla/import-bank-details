@@ -2,7 +2,9 @@
 import json
 import logging
 import os
-from typing import Any, Dict, List, Set
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -102,38 +104,86 @@ def create_nested_category_string(response_format: BaseModel) -> str:
     return categories_str
 
 
-def perform_online_search(expense_name: str, region: str = "de-de", max_results: int = 2) -> str:
-    """
-    Perform an online search using DuckDuckGo and return the search results as a string.
+class SearchCache:
+    def __init__(self, max_retries: int = 3, initial_delay: float = 1.0):
+        self.max_retries: int = max_retries
+        self.initial_delay: float = initial_delay
+        self.last_request_time: float = 0.0  # Initialize as float
+        self.min_request_interval: float = 2.0
 
-    Args:
-        expense_name (str): The name of the expense to search for.
-        region (str, optional): The region to search in. Defaults to "de-de".
-        max_results (int, optional): The maximum number of search results to return. Defaults to 2.
+    def get_cache_path(self, custom_path: Optional[Path] = None) -> Path:
+        cache_dir = custom_path or Path("data/examples")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir / "search_cache.json"
 
-    Returns:
-        str: Concatenated search results or an error message if the search fails.
-    """
-    # List of texts to remove from the expense_name
+    def load_cache(self, cache_path: Optional[Path] = None) -> Dict[str, str]:
+        path = self.get_cache_path(cache_path)
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except json.JSONDecodeError:
+                logger.warning("Cache file corrupted, creating new cache")
+        return {}
+
+    def save_cache(self, cache: Dict[str, str], cache_path: Optional[Path] = None):
+        path = self.get_cache_path(cache_path)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+
+    def rate_limit(self) -> None:
+        current_time = time.time()
+        elapsed = current_time - self.last_request_time
+        if elapsed < self.min_request_interval:
+            time.sleep(self.min_request_interval - elapsed)
+        self.last_request_time = time.time()
+
+
+def perform_online_search(
+    expense_name: str, region: str = "de-de", max_results: int = 2, cache_path: Optional[Path] = None
+) -> str:
+    search_cache = SearchCache()
+
+    # Clean input
     texts_to_remove = ["SumUp  *", "PAYPAL *", "LSP*", "CRV*", "PAY.nl*", "UZR*", "luca "]
-
-    # Remove unwanted texts from the expense_name
+    cleaned_name = expense_name
     for text in texts_to_remove:
-        expense_name = expense_name.replace(text, "")
+        cleaned_name = cleaned_name.replace(text, "")
+    cleaned_name = cleaned_name.strip()
 
-    # Strip extra whitespace after removal
-    expense_name = expense_name.strip()
+    if not cleaned_name:
+        return "Invalid search term"
 
-    try:
-        with DDGS() as ddgs:
-            search_results = list(ddgs.text(expense_name, region=region, max_results=max_results))
-            # Convert each search result dict to a JSON string
-            search_results_str = "\n".join([json.dumps(result, ensure_ascii=False) for result in search_results])
-            return search_results_str
-    except Exception as e:
-        logger.error(f"Online search failed: {str(e)}")
-        # Return a fallback message if the search fails
-        return "[Online search failed to retrieve additional information.]"
+    # Check cache
+    cache_key = f"{cleaned_name}:{region}:{max_results}"
+    cache = search_cache.load_cache(cache_path)
+
+    if cache_key in cache:
+        logger.info(f"Returning cached results for: {cleaned_name}")
+        return cache[cache_key]
+
+    # Implement exponential backoff
+    for attempt in range(search_cache.max_retries):
+        try:
+            search_cache.rate_limit()
+            with DDGS() as ddgs:
+                search_results = list(ddgs.text(cleaned_name, region=region, max_results=max_results))
+
+                if search_results:
+                    search_results_str = "\n".join([json.dumps(result, ensure_ascii=False) for result in search_results])
+                    # Only cache successful results
+                    cache[cache_key] = search_results_str
+                    search_cache.save_cache(cache, cache_path)
+                    return search_results_str
+
+                return "No results found"
+
+        except Exception as e:
+            delay = search_cache.initial_delay * (2**attempt)
+            logger.warning(f"Search attempt {attempt + 1} failed: {str(e)}. Retrying in {delay}s")
+            time.sleep(delay)
+
+    return "Online search failed after multiple attempts"
 
 
 def get_classification(
