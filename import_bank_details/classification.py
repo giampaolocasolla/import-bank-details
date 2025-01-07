@@ -174,7 +174,7 @@ def perform_online_search(
     cleaned_name = cleaned_name.strip()
 
     if not cleaned_name:
-        logger.warning(f"Invalid search term after cleaning: '{expense_name}'")
+        logger.warning(f"Invalid search term after cleaning: {expense_name}")
         return "Invalid search term"
 
     # Check cache
@@ -182,16 +182,16 @@ def perform_online_search(
     cache = search_cache.load_cache(cache_path)
 
     if cache_key in cache:
-        logger.info(f"Cache hit for '{cleaned_name}'")
+        logger.info(f"Returning cached results for: {cleaned_name}")
         return cache[cache_key]
 
-    logger.info(f"Cache miss for '{cleaned_name}', performing online search")
+    logger.info(f"Performing online search as no cached values for: {cleaned_name}")
 
     # Implement exponential backoff
     for attempt in range(search_cache.max_retries):
         try:
             search_cache.rate_limit()
-            logger.debug(f"Search attempt {attempt + 1} for '{cleaned_name}'")
+            logger.debug(f"Search attempt {attempt + 1} for: {cleaned_name}")
 
             with DDGS() as ddgs:
                 search_results = list(ddgs.text(cleaned_name, region=region, max_results=max_results))
@@ -201,7 +201,7 @@ def perform_online_search(
                     # Only cache successful results
                     cache[cache_key] = search_results_str
                     search_cache.save_cache(cache, cache_path)
-                    logger.info(f"Successfully found and cached {len(search_results)} results for '{cleaned_name}'")
+                    logger.info(f"Successfully found and cached {len(search_results)} results for: {cleaned_name}")
                     return search_results_str
 
                 logger.warning(f"No results found for '{cleaned_name}'")
@@ -212,7 +212,7 @@ def perform_online_search(
             logger.warning(f"Search attempt {attempt + 1} failed for '{cleaned_name}': {str(e)}. Retrying in {delay}s")
             time.sleep(delay)
 
-    logger.error(f"Search failed after {search_cache.max_retries} attempts for '{cleaned_name}'")
+    logger.error(f"Search failed after {search_cache.max_retries} attempts for: {cleaned_name}")
     return "Online search failed after multiple attempts"
 
 
