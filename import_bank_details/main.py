@@ -28,7 +28,12 @@ def get_latest_files(data_dir: str) -> Dict[str, str]:
     file_data = {}
     for folder in folders_data:
         folder_path = os.path.join(cwd, data_dir, folder)
-        files = glob.glob(os.path.join(folder_path, "*"))
+        if folder == "examples":
+            # Only look for CSV files in examples folder
+            files = glob.glob(os.path.join(folder_path, "*.csv"))
+        else:
+            files = glob.glob(os.path.join(folder_path, "*"))
+
         if files:
             file_data[folder] = max(files, key=os.path.getctime)
         else:
