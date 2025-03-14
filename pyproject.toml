@@ -13,7 +13,7 @@ openpyxl = "^3.1.5"
 pydantic = "^2.8.2"
 python-dotenv = "^1.0.1"
 openai = "^1.52.0"
-duckduckgo-search = "^6.3.2"
+duckduckgo-search = "^7.5.0"
 
 [tool.poetry.dev-dependencies]
 ipykernel = "^6.29.5"
