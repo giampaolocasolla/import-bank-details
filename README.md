@@ -66,6 +66,40 @@ classification = get_classification(
 )
 ```
 
+## Testing
+
+Run the test suite using the provided test script:
+
+```sh
+./run_tests.sh
+```
+
+The script offers several options:
+
+- `--help`: Show usage information
+- `--verbose`, `-v`: Run tests in verbose mode
+- `--all`: Run all tests (default)
+- `--unit`: Run only unit tests
+- `--integration`: Run only integration tests
+- `--extra PATTERN`: Run tests matching the given pattern
+
+The test output is color-coded:
+- Green: Successful test results
+- Red: Failed tests or errors
+- Yellow: Informational messages
+
+Example usage:
+```sh
+# Run all tests
+./run_tests.sh
+
+# Run only unit tests in verbose mode
+./run_tests.sh --unit -v
+
+# Run tests matching a specific pattern
+./run_tests.sh --extra "test_import"
+```
+
 ## Configuration
 
 - **`config_bank.yaml`**: Specifies the import settings and column mappings for different banks.

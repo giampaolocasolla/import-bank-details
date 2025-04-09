@@ -25,6 +25,7 @@ isort = "^5.10.1"
 mypy = "^1.2.0"
 pre-commit = "^3.0.0"
 types-pyyaml = "^6.0.12.20240917"
+pytest-cov = "^4.1.0"
 
 [tool.isort]
 profile = "black"
@@ -41,6 +42,30 @@ disallow_untyped_defs = false
 warn_return_any = false
 ignore_missing_imports = true
 check_untyped_defs = false
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests",
+]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+
+[tool.coverage.run]
+source = ["import_bank_details"]
+omit = ["tests/*", "**/__init__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "pass",
+    "raise ImportError",
+]
+fail_under = 80
 
 [build-system]
 requires = ["poetry-core"]
