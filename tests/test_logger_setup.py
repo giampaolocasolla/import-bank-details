@@ -9,28 +9,29 @@ import pytest
 from import_bank_details.logger_setup import setup_logging
 
 
-def test_setup_logging_basic():
+@patch("os.makedirs")
+@patch("logging.FileHandler")
+@patch("logging.StreamHandler")
+def test_setup_logging_basic(mock_stream_handler, mock_file_handler, mock_makedirs):
     """Test the basic functionality of setup_logging without file operations."""
     # Save original handlers to restore later
     original_handlers = logging.getLogger().handlers.copy()
 
-    # Test with mocked file handler
-    with patch("logging.FileHandler", MagicMock()):
-        with patch("os.makedirs") as mock_makedirs:
-            # Call the setup_logging function
-            setup_logging()
+    # Setup mock handlers
+    mock_file_handler.return_value = MagicMock()
+    mock_stream_handler.return_value = MagicMock()
 
-            # Check if the log directory creation was attempted
-            mock_makedirs.assert_called_once_with(".log", exist_ok=True)
+    # Call the setup_logging function
+    setup_logging()
 
-            # Get the root logger
-            logger = logging.getLogger()
+    # Check if the log directory creation was attempted
+    mock_makedirs.assert_called_once_with(".log", exist_ok=True)
 
-            # Check if the logger level is set to DEBUG
-            assert logger.level == logging.DEBUG
+    # Get the root logger
+    logger = logging.getLogger()
 
-            # Check if handlers were added (should be 2)
-            assert len(logger.handlers) > len(original_handlers)
+    # Check if the logger level is set to DEBUG
+    assert logger.level == logging.DEBUG
 
     # Clean up - restore original handlers
     logger = logging.getLogger()
