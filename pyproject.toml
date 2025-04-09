@@ -25,7 +25,7 @@ isort = "^5.10.1"
 mypy = "^1.2.0"
 pre-commit = "^3.0.0"
 types-pyyaml = "^6.0.12.20240917"
-pytest-cov = "^4.1.0"
+pytest-cov = "^6.1.1"
 
 [tool.isort]
 profile = "black"
