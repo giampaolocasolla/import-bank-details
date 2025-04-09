@@ -1,5 +1,8 @@
 # Import Bank Details
 
+[![CI](https://github.com/giampaolocasolla/import-bank-details/actions/workflows/ci.yml/badge.svg)](https://github.com/giampaolocasolla/import-bank-details/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/giampaolocasolla/import-bank-details/branch/main/graph/badge.svg)](https://codecov.io/gh/giampaolocasolla/import-bank-details)
+
 This project is designed to import, process, and classify bank details from various sources. It reads data from CSV or Excel files, processes the data according to specified configurations, classifies expenses using OpenAI's language model (with optional online search augmentation), and outputs the processed data to an Excel file.
 
 ## Features
