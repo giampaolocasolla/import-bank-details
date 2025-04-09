@@ -4,12 +4,13 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Type, cast
 
 import pandas as pd
 from dotenv import load_dotenv
 from duckduckgo_search import DDGS
 from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageParam
 from pydantic import BaseModel
 
 from import_bank_details.structured_output import ExpenseEntry, ExpenseInput, ExpenseOutput, ExpenseType
@@ -74,12 +75,12 @@ def get_list_expenses(df: pd.DataFrame, include_output: bool = True) -> List[Exp
     return expenses
 
 
-def create_nested_category_string(response_format: BaseModel) -> str:
+def create_nested_category_string(response_format: Type[BaseModel]) -> str:
     """
     Generates a nested list of primary and secondary categories from the BaseModel's schema.
 
     Args:
-        response_format (BaseModel): The Pydantic BaseModel containing the schema.
+        response_format (Type[BaseModel]): The Pydantic BaseModel class containing the schema.
 
     Returns:
         str: A formatted string representing the nested categories.
@@ -222,10 +223,10 @@ def get_classification(
     system_prompt: str = config_llm["system_prompt"],
     model_name: str = config_llm["llm"]["model_name"],
     temperature: float = config_llm["llm"]["temperature_base"],
-    response_format: BaseModel = ExpenseOutput,
+    response_format: Type[ExpenseOutput] = ExpenseOutput,
     include_categories_in_prompt: bool = False,
     include_online_search: bool = False,
-) -> BaseModel:
+) -> ExpenseOutput:
     """
     Get classification for an expense input using OpenAI's chat completion API.
 
@@ -235,12 +236,13 @@ def get_classification(
         system_prompt (str, optional): The system prompt to use. Defaults to the value from config_llm.
         model_name (str, optional): The name of the model to use. Defaults to the value from config_llm.
         temperature (float, optional): The temperature setting for the model. Defaults to the value from config_llm.
-        response_format (BaseModel, optional): The expected response format. Defaults to ExpenseOutput.
+        response_format (Type[ExpenseOutput], optional): The expected response format.
+            Defaults to ExpenseOutput.
         include_categories_in_prompt (bool, optional): If True, appends the category list to the system prompt.
         include_online_search (bool, optional): If True, appends online search results to the user's message.
 
     Returns:
-        BaseModel: The parsed response from the OpenAI API containing the classification.
+        ExpenseOutput: The parsed response from the OpenAI API containing the classification.
     """
     # If the parameter is True, append the category list to the system prompt
     if include_categories_in_prompt:
@@ -248,7 +250,7 @@ def get_classification(
         # Append the categories to the system prompt
         system_prompt += "\n\n" + categories_str
 
-    messages = [{"role": "system", "content": system_prompt}]
+    messages: List[ChatCompletionMessageParam] = [{"role": "system", "content": system_prompt}]
 
     for example in examples:
         messages.extend(
@@ -275,7 +277,7 @@ def get_classification(
             temperature=temperature,
             response_format=response_format,
         )
-        return response.choices[0].message.parsed
+        return cast(ExpenseOutput, response.choices[0].message.parsed)
     except Exception as e:
         logger.error(f"OpenAI API error: {str(e)}")
         raise
@@ -288,7 +290,7 @@ def classify_expenses(
     system_prompt: str = config_llm["system_prompt"],
     model_name: str = config_llm["llm"]["model_name"],
     temperature: float = config_llm["llm"]["temperature_base"],
-    response_format: BaseModel = ExpenseOutput,
+    response_format: Type[ExpenseOutput] = ExpenseOutput,
     include_categories_in_prompt: bool = False,
     include_online_search: bool = False,
 ) -> pd.DataFrame:
@@ -305,7 +307,8 @@ def classify_expenses(
         system_prompt (str, optional): The system prompt to use for the OpenAI model. Defaults to the value from config_llm.
         model_name (str, optional): The name of the OpenAI model to use. Defaults to the value from config_llm.
         temperature (float, optional): The temperature setting for the OpenAI model. Defaults to the value from config_llm.
-        response_format (BaseModel, optional): The expected response format from the OpenAI model. Defaults to ExpenseOutput.
+        response_format (Type[ExpenseOutput], optional): The expected response format from the OpenAI model.
+            Defaults to ExpenseOutput.
         include_categories_in_prompt (bool, optional): If True, appends the category list to the system prompt.
         include_online_search (bool, optional): If True, appends online search results to the user's message.
 
@@ -378,7 +381,7 @@ def classify_expenses(
                     "Secondary": expense_output.subcategory,
                 }
             )
-            logger.debug(f"Classified expense as {expense_output.category}, {expense_output.subcategory}")
+            logger.debug(f"Classified expense as " f"{expense_output.category}, {expense_output.subcategory}")
         except Exception as e:
             logger.error(f"Error processing expense {expense_input}: {e}")
             # Handle parsing error by appending None or default values
