@@ -2,10 +2,41 @@
 
 import logging
 import os
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from import_bank_details.logger_setup import setup_logging
+
+
+def test_setup_logging_basic():
+    """Test the basic functionality of setup_logging without file operations."""
+    # Save original handlers to restore later
+    original_handlers = logging.getLogger().handlers.copy()
+
+    # Test with mocked file handler
+    with patch("logging.FileHandler", MagicMock()):
+        with patch("os.makedirs") as mock_makedirs:
+            # Call the setup_logging function
+            setup_logging()
+
+            # Check if the log directory creation was attempted
+            mock_makedirs.assert_called_once_with(".log", exist_ok=True)
+
+            # Get the root logger
+            logger = logging.getLogger()
+
+            # Check if the logger level is set to DEBUG
+            assert logger.level == logging.DEBUG
+
+            # Check if handlers were added (should be 2)
+            assert len(logger.handlers) > len(original_handlers)
+
+    # Clean up - restore original handlers
+    logger = logging.getLogger()
+    for handler in logger.handlers[:]:
+        if handler not in original_handlers:
+            logger.removeHandler(handler)
 
 
 @pytest.mark.skip(reason="Log file path is inconsistent in CI environment")

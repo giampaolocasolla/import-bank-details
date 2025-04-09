@@ -1,14 +1,19 @@
 """Tests for the classification module."""
 
+import time
+from pathlib import Path
 from unittest import mock
+from unittest.mock import MagicMock, mock_open, patch
 
 import pandas as pd
 
 from import_bank_details.classification import (
+    SearchCache,
     classify_expenses,
     create_nested_category_string,
     get_classification,
     get_list_expenses,
+    perform_online_search,
 )
 from import_bank_details.structured_output import ExpenseEntry, ExpenseOutput, ExpenseType
 
@@ -260,3 +265,154 @@ def test_classify_expenses_skip_negative(mock_get_classification):
 
     # Check if get_classification was called only once (for the positive amount)
     assert mock_get_classification.call_count == 1
+
+
+def test_search_cache_init():
+    """Test the SearchCache initialization."""
+    cache = SearchCache()
+    assert cache.max_retries == 3
+    assert cache.initial_delay == 1.0
+    assert cache.last_request_time == 0.0
+    assert cache.min_request_interval == 2.0
+
+    custom_cache = SearchCache(max_retries=5, initial_delay=2.0)
+    assert custom_cache.max_retries == 5
+    assert custom_cache.initial_delay == 2.0
+
+
+def test_search_cache_get_cache_path(tmpdir):
+    """Test the get_cache_path method."""
+    cache = SearchCache()
+
+    # Test default path
+    default_path = cache.get_cache_path()
+    assert str(default_path).endswith("data/examples/search_cache.json")
+
+    # Test custom path
+    custom_dir = Path(tmpdir)
+    custom_path = cache.get_cache_path(custom_dir)
+    assert custom_path == custom_dir / "search_cache.json"
+    assert custom_dir.exists()
+
+
+def test_search_cache_load_cache():
+    """Test the load_cache method."""
+    cache = SearchCache()
+
+    # Test for non-existent file
+    with patch("pathlib.Path.exists", return_value=False):
+        result = cache.load_cache()
+        assert result == {}
+
+    # Test for existing file
+    mock_json_data = '{"test_key": "test_value"}'
+    with patch("pathlib.Path.exists", return_value=True):
+        with patch("builtins.open", mock_open(read_data=mock_json_data)):
+            result = cache.load_cache()
+            assert result == {"test_key": "test_value"}
+
+    # Test for JSON decode error
+    with patch("pathlib.Path.exists", return_value=True):
+        with patch("builtins.open", mock_open(read_data="invalid json")):
+            with patch("import_bank_details.classification.logger.warning") as mock_warning:
+                result = cache.load_cache()
+                assert result == {}
+                mock_warning.assert_called_once()
+
+
+def test_search_cache_save_cache(tmpdir):
+    """Test the save_cache method."""
+    cache = SearchCache()
+    test_data = {"test_key": "test_value"}
+
+    with patch("builtins.open", mock_open()) as mock_file:
+        cache.save_cache(test_data)
+        mock_file.assert_called_once()
+
+
+def test_search_cache_rate_limit():
+    """Test the rate_limit method."""
+    cache = SearchCache()
+    cache.min_request_interval = 0.1  # Set a small interval for testing
+
+    # First call should not sleep
+    start_time = time.time()
+    cache.rate_limit()
+    elapsed = time.time() - start_time
+    assert elapsed < 0.05  # Should be almost instant
+
+    # Second immediate call should sleep
+    with patch("time.sleep") as mock_sleep:
+        cache.rate_limit()
+        mock_sleep.assert_called_once()
+
+
+@patch("import_bank_details.classification.DDGS")
+def test_perform_online_search_basic(mock_ddgs):
+    """Test the perform_online_search function with basic functionality."""
+    # Set up mock for DDGS
+    mock_instance = MagicMock()
+    mock_ddgs.return_value.__enter__.return_value = mock_instance
+
+    # Set up search results
+    mock_results = [{"title": "Test Result", "body": "Test Content"}]
+    mock_instance.text.return_value = mock_results
+
+    # Test with valid search term
+    with patch("import_bank_details.classification.SearchCache") as mock_cache_class:
+        mock_cache = MagicMock()
+        mock_cache.load_cache.return_value = {}
+        mock_cache_class.return_value = mock_cache
+
+        result = perform_online_search("test query")
+
+        # Verify expected calls
+        mock_cache.load_cache.assert_called_once()
+        mock_cache.save_cache.assert_called_once()
+        mock_instance.text.assert_called_once()
+
+        # Check that results contain the expected content
+        assert "Test Result" in result
+        assert "Test Content" in result
+
+
+@patch("import_bank_details.classification.SearchCache")
+def test_perform_online_search_cached(mock_cache_class):
+    """Test the perform_online_search function with cached results."""
+    # Set up mock for SearchCache
+    mock_cache = MagicMock()
+    mock_cache.load_cache.return_value = {"test query:de-de:2": "Cached result"}
+    mock_cache_class.return_value = mock_cache
+
+    result = perform_online_search("test query")
+
+    # Verify cache was checked but not saved (as we got a hit)
+    mock_cache.load_cache.assert_called_once()
+    mock_cache.save_cache.assert_not_called()
+
+    # Check result is from cache
+    assert result == "Cached result"
+
+
+@patch("import_bank_details.classification.DDGS")
+def test_perform_online_search_empty_results(mock_ddgs):
+    """Test the perform_online_search function with empty results."""
+    # Set up mock for DDGS with empty results
+    mock_instance = MagicMock()
+    mock_instance.text.return_value = []
+    mock_ddgs.return_value.__enter__.return_value = mock_instance
+
+    with patch("import_bank_details.classification.SearchCache") as mock_cache_class:
+        mock_cache = MagicMock()
+        mock_cache.load_cache.return_value = {}
+        mock_cache_class.return_value = mock_cache
+
+        result = perform_online_search("test query")
+
+        # Verify expected calls
+        mock_cache.load_cache.assert_called_once()
+        # Cache should NOT be saved for empty results
+        mock_cache.save_cache.assert_not_called()
+
+        # Check that result is the expected "not found" message
+        assert result == "No results found"
