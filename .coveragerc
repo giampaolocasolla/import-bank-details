@@ -1,0 +1,16 @@
+[run]
+source = import_bank_details
+omit =
+    import_bank_details/logger_setup.py
+    import_bank_details/__init__.py
+    tests/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    pass
+    raise ImportError
+fail_under = 80

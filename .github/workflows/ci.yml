@@ -44,7 +44,7 @@ jobs:
         run: poetry run mypy .
 
       - name: Run tests with pytest
-        run: poetry run pytest --cov=import_bank_details
+        run: poetry run pytest --cov=import_bank_details --cov-report=xml --cov-fail-under=80 --cov-config=.coveragerc
 
       - name: Generate coverage report
         run: poetry run pytest --cov=import_bank_details --cov-report=xml
