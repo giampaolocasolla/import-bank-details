@@ -35,6 +35,7 @@ repos:
           - "types-requests"
           - "types-pytz"
           - "types-pyyaml"
+          - "openai"
 
 
   - repo: https://github.com/pycqa/flake8
