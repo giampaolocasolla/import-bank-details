@@ -100,6 +100,21 @@ Example usage:
 ./run_tests.sh --extra "test_import"
 ```
 
+## CI/CD Pipeline
+
+This project uses GitHub Actions for Continuous Integration and Continuous Deployment:
+
+- **Automated Tests**: All tests are automatically run on each push and pull request.
+- **Code Quality Checks**:
+  - Code formatting with Black
+  - Linting with Flake8
+  - Import sorting with isort
+  - Type checking with mypy
+  - Pre-commit hook verification
+- **Test Coverage**: Coverage reports are generated and uploaded to Codecov.
+
+You can see the status of these checks on any pull request or in the Actions tab of the GitHub repository.
+
 ## Configuration
 
 - **`config_bank.yaml`**: Specifies the import settings and column mappings for different banks.

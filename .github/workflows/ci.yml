@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.6.1
+          virtualenvs-create: true
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Setup test environment
+        run: |
+          # Create a temporary .env file with placeholder values for testing
+          echo "OPENAI_API_KEY=dummy-key-for-testing" > .env
+
+      - name: Check code formatting with Black
+        run: poetry run black --check .
+
+      - name: Lint with flake8
+        run: poetry run flake8 .
+
+      - name: Check imports with isort
+        run: poetry run isort --check .
+
+      - name: Type check with mypy
+        run: poetry run mypy .
+
+      - name: Run tests with pytest
+        run: poetry run pytest --cov=import_bank_details
+
+      - name: Generate coverage report
+        run: poetry run pytest --cov=import_bank_details --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.xml
+          fail_ci_if_error: false
