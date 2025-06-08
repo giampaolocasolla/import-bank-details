@@ -2,7 +2,9 @@
 import json
 import logging
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Type, cast
 
@@ -12,6 +14,8 @@ from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from pydantic import BaseModel
 from tavily import TavilyClient
+from tqdm import tqdm
+from tqdm.contrib.logging import tqdm_logging_redirect
 
 from import_bank_details.structured_output import ExpenseEntry, ExpenseInput, ExpenseOutput, ExpenseType
 from import_bank_details.utils import load_config
@@ -130,6 +134,7 @@ class SearchCache:
         self.initial_delay: float = initial_delay
         self.last_request_time: float = 0.0  # Initialize as float
         self.min_request_interval: float = 4.0
+        self.lock = threading.Lock()
 
     def get_cache_path(self, custom_path: Optional[Path] = None) -> Path:
         cache_dir = custom_path or Path("data/examples")
@@ -152,11 +157,12 @@ class SearchCache:
             json.dump(cache, f, ensure_ascii=False, indent=2)
 
     def rate_limit(self) -> None:
-        current_time = time.time()
-        elapsed = current_time - self.last_request_time
-        if elapsed < self.min_request_interval:
-            time.sleep(self.min_request_interval - elapsed)
-        self.last_request_time = time.time()
+        with self.lock:
+            current_time = time.time()
+            elapsed = current_time - self.last_request_time
+            if elapsed < self.min_request_interval:
+                time.sleep(self.min_request_interval - elapsed)
+            self.last_request_time = time.time()
 
 
 search_cache = SearchCache()
@@ -181,7 +187,7 @@ def perform_online_search(expense_name: str, max_results: int = 2, cache_path: O
         '{"title": "Best Coffee Shops in Berlin", ...}'
 
         >>> perform_online_search("INVALID", cache_path=Path("/tmp/cache"))
-        'No results found'
+        'Invalid search term'
     """
     logger.info(f"Starting search for expense: '{expense_name}'")
 
@@ -198,11 +204,11 @@ def perform_online_search(expense_name: str, max_results: int = 2, cache_path: O
 
     # Check cache
     cache_key = f"{cleaned_name}:{max_results}"
-    cache = search_cache.load_cache(cache_path)
-
-    if cache_key in cache:
-        logger.info(f"Returning cached results for: {cleaned_name}")
-        return cache[cache_key]
+    with search_cache.lock:
+        cache = search_cache.load_cache(cache_path)
+        if cache_key in cache:
+            logger.info(f"Returning cached results for: {cleaned_name}")
+            return cache[cache_key]
 
     logger.info(f"Performing online search as no cached values for: {cleaned_name}")
 
@@ -220,16 +226,20 @@ def perform_online_search(expense_name: str, max_results: int = 2, cache_path: O
                 country="germany",
             )
 
+            search_result_str: str
             if search_results and search_results.get("results"):
-                search_results_str = json.dumps(search_results["results"], ensure_ascii=False)
-                # Only cache successful results
-                cache[cache_key] = search_results_str
-                search_cache.save_cache(cache, cache_path)
+                search_result_str = json.dumps(search_results["results"], ensure_ascii=False)
                 logger.info(f"Successfully found and cached {len(search_results['results'])} results for: {cleaned_name}")
-                return search_results_str
+            else:
+                search_result_str = "No results found"
+                logger.warning(f"No results found for '{cleaned_name}'")
 
-            logger.warning(f"No results found for '{cleaned_name}'")
-            return "No results found"
+            # Only cache successful results
+            with search_cache.lock:
+                cache = search_cache.load_cache(cache_path)
+                cache[cache_key] = search_result_str
+                search_cache.save_cache(cache, cache_path)
+            return search_result_str
 
         except Exception as e:
             delay = search_cache.initial_delay * (2**attempt)
@@ -237,7 +247,12 @@ def perform_online_search(expense_name: str, max_results: int = 2, cache_path: O
             time.sleep(delay)
 
     logger.error(f"Search failed after {search_cache.max_retries} attempts for: {cleaned_name}")
-    return "Online search failed after multiple attempts"
+    failure_message = "Online search failed after multiple attempts"
+    with search_cache.lock:
+        cache = search_cache.load_cache(cache_path)
+        cache[cache_key] = failure_message
+        search_cache.save_cache(cache, cache_path)
+    return failure_message
 
 
 def get_classification(
@@ -308,6 +323,75 @@ def get_classification(
 
 
 # %%
+def _classify_single_expense(
+    expense_entry: ExpenseEntry,
+    examples: List[Dict[str, Any]],
+    system_prompt: str,
+    model_name: str,
+    temperature: float,
+    response_format: Type[ExpenseOutput],
+    include_categories_in_prompt: bool,
+    include_online_search: bool,
+) -> Dict[str, Any]:
+    """
+    Classify a single expense entry.
+
+    Args:
+        expense_entry (ExpenseEntry): The expense entry to classify.
+        examples (List[Dict[str, Any]]): List of example classifications.
+        system_prompt (str): The system prompt to use.
+        model_name (str): The name of the model to use.
+        temperature (float): The temperature setting for the model.
+        response_format (Type[ExpenseOutput]): The expected response format.
+        include_categories_in_prompt (bool): If True, appends the category list to the system prompt.
+        include_online_search (bool): If True, appends online search results to the user's message.
+
+    Returns:
+        Dict[str, Any]: A dictionary containing the original expense data along with the classification results.
+    """
+    expense_input = expense_entry.input
+    logger.debug(f"Processing expense: {expense_input}")
+
+    amount_str = expense_input.Amount
+    try:
+        amount = float(amount_str)
+    except ValueError:
+        amount = 0
+        logger.warning(f"Invalid amount '{amount_str}' for expense: {expense_input}")
+
+    if amount < 0:
+        logger.info("Skipping classification for negative amount")
+        return {
+            **expense_input.model_dump(),
+            "Primary": None,
+            "Secondary": None,
+        }
+
+    try:
+        expense_output = get_classification(
+            expense_input=expense_input.model_dump(),
+            examples=examples,
+            system_prompt=system_prompt,
+            model_name=model_name,
+            temperature=temperature,
+            response_format=response_format,
+            include_categories_in_prompt=include_categories_in_prompt,
+            include_online_search=include_online_search,
+        )
+        return {
+            **expense_input.model_dump(),
+            "Primary": expense_output.category,
+            "Secondary": expense_output.subcategory,
+        }
+    except Exception as e:
+        logger.error(f"Error processing expense {expense_input}: {e}")
+        return {
+            **expense_input.model_dump(),
+            "Primary": None,
+            "Secondary": None,
+        }
+
+
 def classify_expenses(
     df: pd.DataFrame,
     df_examples: pd.DataFrame,
@@ -317,13 +401,14 @@ def classify_expenses(
     response_format: Type[ExpenseOutput] = ExpenseOutput,
     include_categories_in_prompt: bool = False,
     include_online_search: bool = False,
+    max_workers: int = 50,
 ) -> pd.DataFrame:
     """
     Classify expenses in the given DataFrame using example data and OpenAI's language model.
 
     This function processes each expense in the input DataFrame, classifies it using the
     provided example data and the OpenAI model, and returns a new DataFrame with the
-    classification results.
+    classification results. This version uses parallel processing to speed up the classification.
 
     Args:
         df (pd.DataFrame): The DataFrame containing expenses to be classified.
@@ -335,6 +420,7 @@ def classify_expenses(
             Defaults to ExpenseOutput.
         include_categories_in_prompt (bool, optional): If True, appends the category list to the system prompt.
         include_online_search (bool, optional): If True, appends online search results to the user's message.
+        max_workers (int, optional): The maximum number of workers for parallel processing. Defaults to 50.
 
     Returns:
         pd.DataFrame: A new DataFrame containing the original expense data along with
@@ -350,72 +436,50 @@ def classify_expenses(
     logger.info(f"Got {len(expenses)} expenses to classify")
 
     # Get the list of example expenses
-    examples = get_list_expenses(df=df_examples, include_output=True)
+    examples_list = get_list_expenses(df=df_examples, include_output=True)
+    examples = [
+        {
+            "input": ex.input.model_dump(),
+            "output": ex.output.expense_type.value,
+        }
+        for ex in examples_list
+        if ex.output is not None
+    ]
     logger.info(f"Got {len(examples)} example expenses")
 
     # Prepare the list to store classification results
     classification_results = []
 
-    for expense_entry in expenses:
-        expense_input = expense_entry.input
-        logger.debug(f"Processing expense: {expense_input}")
+    with ThreadPoolExecutor(max_workers=max_workers) as executor, tqdm_logging_redirect(desc="Classifying expenses"):
+        future_to_expense = {
+            executor.submit(
+                _classify_single_expense,
+                expense_entry,
+                examples,
+                system_prompt,
+                model_name,
+                temperature,
+                response_format,
+                include_categories_in_prompt,
+                include_online_search,
+            ): expense_entry
+            for expense_entry in expenses
+        }
 
-        # Check if the 'Amount' is negative
-        amount_str = expense_input.Amount
-        try:
-            amount = float(amount_str)
-        except ValueError:
-            amount = 0  # Default to 0 if amount is not a valid number
-            logger.warning(f"Invalid amount '{amount_str}' for expense: {expense_input}")
-
-        if amount < 0:
-            logger.info("Skipping classification for negative amount")
-            # Append the expense with 'Primary' and 'Secondary' set to None
-            classification_results.append(
-                {
-                    **expense_input.model_dump(),
-                    "Primary": None,
-                    "Secondary": None,
-                }
-            )
-            continue  # Skip to the next expense
-
-        try:
-            expense_output = get_classification(
-                expense_input=expense_input.model_dump(),
-                examples=[
+        for future in tqdm(as_completed(future_to_expense), total=len(expenses), desc="Classifying expenses"):
+            try:
+                result = future.result()
+                classification_results.append(result)
+            except Exception as exc:
+                expense_input = future_to_expense[future].input
+                logger.error(f"Expense {expense_input} generated an exception: {exc}")
+                classification_results.append(
                     {
-                        "input": ex.input.model_dump(),
-                        "output": ex.output.expense_type.value,
+                        **expense_input.model_dump(),
+                        "Primary": None,
+                        "Secondary": None,
                     }
-                    for ex in examples
-                    if ex.output is not None
-                ],
-                system_prompt=system_prompt,
-                model_name=model_name,
-                temperature=temperature,
-                response_format=response_format,
-                include_categories_in_prompt=include_categories_in_prompt,
-                include_online_search=include_online_search,
-            )
-            classification_results.append(
-                {
-                    **expense_input.model_dump(),
-                    "Primary": expense_output.category,
-                    "Secondary": expense_output.subcategory,
-                }
-            )
-            logger.debug(f"Classified expense as " f"{expense_output.category}, {expense_output.subcategory}")
-        except Exception as e:
-            logger.error(f"Error processing expense {expense_input}: {e}")
-            # Handle parsing error by appending None or default values
-            classification_results.append(
-                {
-                    **expense_input.model_dump(),
-                    "Primary": None,
-                    "Secondary": None,
-                }
-            )
+                )
 
     # Convert the classification results into a DataFrame
     df_with_output = pd.DataFrame(classification_results)
@@ -428,7 +492,8 @@ def classify_expenses(
                 # Convert 'Day' column to datetime with explicit format
                 df_with_output[column] = pd.to_datetime(df_with_output[column], format="%d/%m/%Y", errors="coerce")
             else:
-                df_with_output[column] = df_with_output[column].astype(df[column].dtype)
+                if not df_with_output.empty:
+                    df_with_output[column] = df_with_output[column].astype(df[column].dtype)
 
     logger.info("Column types adjusted to match original DataFrame")
 

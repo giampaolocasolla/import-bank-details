@@ -1,5 +1,6 @@
 """Tests for the classification module."""
 
+import threading
 import time
 from pathlib import Path
 from unittest import mock
@@ -188,10 +189,17 @@ def test_classify_expenses(mock_get_classification):
     mock_output1 = ExpenseOutput(expense_type=expense_type_groceries)
     mock_output2 = ExpenseOutput(expense_type=expense_type_restaurants)
 
-    # Mock the get_classification function to return different values based on input
-    mock_get_classification.side_effect = lambda **kwargs: (
-        mock_output1 if kwargs["expense_input"]["Expense_name"] == "Supermarket" else mock_output2
-    )
+    # Thread-safe mock side_effect
+    lock = threading.Lock()
+
+    def side_effect(**kwargs):
+        with lock:
+            expense_name = kwargs["expense_input"]["Expense_name"]
+            if expense_name == "Supermarket":
+                return mock_output1
+            return mock_output2
+
+    mock_get_classification.side_effect = side_effect
 
     # Call classify_expenses
     result_df = classify_expenses(
@@ -208,10 +216,14 @@ def test_classify_expenses(mock_get_classification):
     # Check the result
     assert "Primary" in result_df.columns
     assert "Secondary" in result_df.columns
-    assert result_df["Primary"].iloc[0] == "Groceries"
-    assert result_df["Secondary"].iloc[0] == "Auchan"
-    assert result_df["Primary"].iloc[1] == "Out"
-    assert result_df["Secondary"].iloc[1] == "Restaurants"
+
+    # Sort by Expense_name to ensure consistent order
+    result_df = result_df.sort_values(by="Expense_name").reset_index()
+
+    assert result_df.loc[0, "Primary"] == "Out"
+    assert result_df.loc[0, "Secondary"] == "Restaurants"
+    assert result_df.loc[1, "Primary"] == "Groceries"
+    assert result_df.loc[1, "Secondary"] == "Auchan"
 
     # Check if get_classification was called twice
     assert mock_get_classification.call_count == 2
@@ -382,7 +394,7 @@ def test_perform_online_search_basic(mock_get_tavily_client, mock_search_cache):
     result = perform_online_search("test query")
 
     # Verify expected calls
-    mock_search_cache.load_cache.assert_called_once()
+    assert mock_search_cache.load_cache.call_count == 2
     mock_search_cache.save_cache.assert_called_once()
     mock_tavily_client.search.assert_called_once_with(query="test query", search_depth="basic", max_results=2, country="germany")
 
@@ -420,9 +432,9 @@ def test_perform_online_search_empty_results(mock_get_tavily_client, mock_search
     result = perform_online_search("test query")
 
     # Verify expected calls
-    mock_search_cache.load_cache.assert_called_once()
-    # Cache should NOT be saved for empty results
-    mock_search_cache.save_cache.assert_not_called()
+    assert mock_search_cache.load_cache.call_count == 2
+    # Cache should be saved for empty results now
+    mock_search_cache.save_cache.assert_called_once()
 
     # Check that result is the expected "not found" message
     assert result == "No results found"
@@ -446,9 +458,9 @@ def test_perform_online_search_retry_and_fail(mock_get_tavily_client, mock_searc
     result = perform_online_search("test query")
 
     # Verify it tried to load from cache
-    mock_search_cache.load_cache.assert_called_once()
-    # Verify it never saved to cache
-    mock_search_cache.save_cache.assert_not_called()
+    assert mock_search_cache.load_cache.call_count == 2
+    # Verify it saved the failure message to cache
+    mock_search_cache.save_cache.assert_called_once()
     # Verify the number of search attempts
     assert mock_tavily_client.search.call_count == 3
     # Verify the number of sleeps
@@ -479,7 +491,7 @@ def test_perform_online_search_retry_and_succeed(mock_get_tavily_client, mock_se
     result = perform_online_search("test query")
 
     # Verify it tried to load from cache
-    mock_search_cache.load_cache.assert_called_once()
+    assert mock_search_cache.load_cache.call_count == 2
     # Verify it saved to cache on success
     mock_search_cache.save_cache.assert_called_once()
     # Verify the number of search attempts

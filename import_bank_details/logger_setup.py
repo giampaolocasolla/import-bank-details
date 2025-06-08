@@ -45,3 +45,8 @@ def setup_logging() -> None:
     # Add handlers to the root logger
     logger.addHandler(file_handler)
     logger.addHandler(stream_handler)
+
+    # Suppress verbose logging from third-party libraries
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)

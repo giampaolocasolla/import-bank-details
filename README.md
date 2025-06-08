@@ -9,9 +9,11 @@ This project is designed to import, process, and classify bank details from vari
 
 - **Import Data from Multiple Banks**: Supports Curve, ING, N26, Revolut, and more.
 - **Data Cleaning and Processing**: Cleans and processes data based on configurable settings.
-- **Expense Classification**:
-  - **Primary Classification**: Uses OpenAI's GPT model to categorize expenses.
-  - **Enhanced Classification**: Optionally integrates online search results to improve classification accuracy.
+- **Parallel Expense Classification**:
+  - Classifies expenses in parallel to significantly speed up processing time.
+  - The number of parallel workers can be configured in `import_bank_details/main.py`.
+- **Primary Classification**: Uses OpenAI's GPT model to categorize expenses.
+- **Enhanced Classification**: Optionally integrates online search results to improve classification accuracy.
 - **Online Search Integration**: Fetches additional information from Tavily to augment expense classification.
 - **Output to Excel**: Exports the processed and classified data to an Excel file for easy review and analysis.
 
