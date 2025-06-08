@@ -497,5 +497,10 @@ def classify_expenses(
 
     logger.info("Column types adjusted to match original DataFrame")
 
+    # Sort the DataFrame by the 'Day' column
+    if "Day" in df_with_output.columns:
+        df_with_output = df_with_output.sort_values(by="Day").reset_index(drop=True)
+        logger.info("DataFrame sorted by 'Day' column")
+
     logger.info("Expense classification completed")
     return df_with_output
