@@ -6,7 +6,6 @@ from unittest import mock
 from unittest.mock import MagicMock, mock_open, patch
 
 import pandas as pd
-from duckduckgo_search.exceptions import DuckDuckGoSearchException, RatelimitException
 
 from import_bank_details.classification import (
     SearchCache,
@@ -272,9 +271,9 @@ def test_search_cache_init():
     """Test the SearchCache initialization."""
     cache = SearchCache()
     assert cache.max_retries == 3
-    assert cache.initial_delay == 1.0
+    assert cache.initial_delay == 2.0
     assert cache.last_request_time == 0.0
-    assert cache.min_request_interval == 2.0
+    assert cache.min_request_interval == 4.0
 
     custom_cache = SearchCache(max_retries=5, initial_delay=2.0)
     assert custom_cache.max_retries == 5
@@ -348,139 +347,117 @@ def test_search_cache_rate_limit():
         mock_sleep.assert_called_once()
 
 
-@patch("import_bank_details.classification.DDGS")
-def test_perform_online_search_basic(mock_ddgs):
+@patch("import_bank_details.classification.search_cache", new_callable=MagicMock)
+@patch("import_bank_details.classification.tavily_client")
+def test_perform_online_search_basic(mock_tavily_client, mock_search_cache):
     """Test the perform_online_search function with basic functionality."""
-    # Set up mock for DDGS
-    mock_instance = MagicMock()
-    mock_ddgs.return_value.__enter__.return_value = mock_instance
-
     # Set up search results
-    mock_results = [{"title": "Test Result", "body": "Test Content"}]
-    mock_instance.text.return_value = mock_results
+    mock_results = {"results": [{"title": "Test Result", "content": "Test Content"}]}
+    mock_tavily_client.search.return_value = mock_results
 
     # Test with valid search term
-    with patch("import_bank_details.classification.SearchCache") as mock_cache_class:
-        mock_cache = MagicMock()
-        mock_cache.load_cache.return_value = {}
-        mock_cache_class.return_value = mock_cache
+    mock_search_cache.load_cache.return_value = {}
+    result = perform_online_search("test query")
 
-        result = perform_online_search("test query")
+    # Verify expected calls
+    mock_search_cache.load_cache.assert_called_once()
+    mock_search_cache.save_cache.assert_called_once()
+    mock_tavily_client.search.assert_called_once_with(query="test query", search_depth="basic", max_results=2, country="germany")
 
-        # Verify expected calls
-        mock_cache.load_cache.assert_called_once()
-        mock_cache.save_cache.assert_called_once()
-        mock_instance.text.assert_called_once()
-
-        # Check that results contain the expected content
-        assert "Test Result" in result
-        assert "Test Content" in result
+    # Check that results contain the expected content
+    assert "Test Result" in result
+    assert "Test Content" in result
 
 
-@patch("import_bank_details.classification.SearchCache")
-def test_perform_online_search_cached(mock_cache_class):
+@patch("import_bank_details.classification.search_cache", new_callable=MagicMock)
+def test_perform_online_search_cached(mock_search_cache):
     """Test the perform_online_search function with cached results."""
     # Set up mock for SearchCache
-    mock_cache = MagicMock()
-    mock_cache.load_cache.return_value = {"test query:de-de:2": "Cached result"}
-    mock_cache_class.return_value = mock_cache
+    mock_search_cache.load_cache.return_value = {"test query:2": "Cached result"}
 
     result = perform_online_search("test query")
 
     # Verify cache was checked but not saved (as we got a hit)
-    mock_cache.load_cache.assert_called_once()
-    mock_cache.save_cache.assert_not_called()
+    mock_search_cache.load_cache.assert_called_once()
+    mock_search_cache.save_cache.assert_not_called()
 
     # Check result is from cache
     assert result == "Cached result"
 
 
-@patch("import_bank_details.classification.DDGS")
-def test_perform_online_search_empty_results(mock_ddgs):
+@patch("import_bank_details.classification.search_cache", new_callable=MagicMock)
+@patch("import_bank_details.classification.tavily_client")
+def test_perform_online_search_empty_results(mock_tavily_client, mock_search_cache):
     """Test the perform_online_search function with empty results."""
-    # Set up mock for DDGS with empty results
-    mock_instance = MagicMock()
-    mock_instance.text.return_value = []
-    mock_ddgs.return_value.__enter__.return_value = mock_instance
+    # Set up mock for Tavily with empty results
+    mock_tavily_client.search.return_value = {"results": []}
 
-    with patch("import_bank_details.classification.SearchCache") as mock_cache_class:
-        mock_cache = MagicMock()
-        mock_cache.load_cache.return_value = {}
-        mock_cache_class.return_value = mock_cache
+    mock_search_cache.load_cache.return_value = {}
+    result = perform_online_search("test query")
 
-        result = perform_online_search("test query")
+    # Verify expected calls
+    mock_search_cache.load_cache.assert_called_once()
+    # Cache should NOT be saved for empty results
+    mock_search_cache.save_cache.assert_not_called()
 
-        # Verify expected calls
-        mock_cache.load_cache.assert_called_once()
-        # Cache should NOT be saved for empty results
-        mock_cache.save_cache.assert_not_called()
-
-        # Check that result is the expected "not found" message
-        assert result == "No results found"
+    # Check that result is the expected "not found" message
+    assert result == "No results found"
 
 
 @patch("time.sleep", return_value=None)
-@patch("import_bank_details.classification.DDGS")
-def test_perform_online_search_retry_and_fail(mock_ddgs, mock_sleep):
+@patch("import_bank_details.classification.search_cache", new_callable=MagicMock)
+@patch("import_bank_details.classification.tavily_client")
+def test_perform_online_search_retry_and_fail(mock_tavily_client, mock_search_cache, mock_sleep):
     """Test the perform_online_search function with retry logic for failures."""
-    # Set up mock for DDGS to always raise an exception
-    mock_instance = MagicMock()
-    mock_instance.text.side_effect = RatelimitException("Rate limit exceeded")
-    mock_ddgs.return_value.__enter__.return_value = mock_instance
+    # Set up mock for Tavily to always raise an exception
+    mock_tavily_client.search.side_effect = Exception("API limit exceeded")
 
-    with patch("import_bank_details.classification.SearchCache") as mock_cache_class:
-        mock_cache = MagicMock()
-        mock_cache.load_cache.return_value = {}
-        # Set max_retries to a specific value for the test
-        mock_cache.max_retries = 3
-        mock_cache.initial_delay = 0.1
-        mock_cache_class.return_value = mock_cache
+    mock_search_cache.load_cache.return_value = {}
+    # Set max_retries to a specific value for the test
+    mock_search_cache.max_retries = 3
+    mock_search_cache.initial_delay = 0.1
 
-        result = perform_online_search("test query")
+    result = perform_online_search("test query")
 
-        # Verify it tried to load from cache
-        mock_cache.load_cache.assert_called_once()
-        # Verify it never saved to cache
-        mock_cache.save_cache.assert_not_called()
-        # Verify the number of search attempts
-        assert mock_instance.text.call_count == 3
-        # Verify the number of sleeps
-        assert mock_sleep.call_count == 3
-        # Check for the final error message
-        assert result == "Online search failed after multiple attempts"
+    # Verify it tried to load from cache
+    mock_search_cache.load_cache.assert_called_once()
+    # Verify it never saved to cache
+    mock_search_cache.save_cache.assert_not_called()
+    # Verify the number of search attempts
+    assert mock_tavily_client.search.call_count == 3
+    # Verify the number of sleeps
+    assert mock_sleep.call_count == 3
+    # Check for the final error message
+    assert result == "Online search failed after multiple attempts"
 
 
 @patch("time.sleep", return_value=None)
-@patch("import_bank_details.classification.DDGS")
-def test_perform_online_search_retry_and_succeed(mock_ddgs, mock_sleep):
+@patch("import_bank_details.classification.search_cache", new_callable=MagicMock)
+@patch("import_bank_details.classification.tavily_client")
+def test_perform_online_search_retry_and_succeed(mock_tavily_client, mock_search_cache, mock_sleep):
     """Test the perform_online_search function with retry logic that succeeds."""
-    # Set up mock for DDGS to fail twice, then succeed
-    mock_instance = MagicMock()
-    mock_results = [{"title": "Test Result", "body": "Test Content"}]
-    mock_instance.text.side_effect = [
-        RatelimitException("Rate limit exceeded"),
-        DuckDuckGoSearchException("Search error"),
+    # Set up mock for Tavily to fail twice, then succeed
+    mock_results = {"results": [{"title": "Test Result", "content": "Test Content"}]}
+    mock_tavily_client.search.side_effect = [
+        Exception("API limit exceeded"),
+        Exception("Search error"),
         mock_results,
     ]
-    mock_ddgs.return_value.__enter__.return_value = mock_instance
 
-    with patch("import_bank_details.classification.SearchCache") as mock_cache_class:
-        mock_cache = MagicMock()
-        mock_cache.load_cache.return_value = {}
-        mock_cache.max_retries = 3
-        mock_cache.initial_delay = 0.1
-        mock_cache_class.return_value = mock_cache
+    mock_search_cache.load_cache.return_value = {}
+    mock_search_cache.max_retries = 3
+    mock_search_cache.initial_delay = 0.1
 
-        result = perform_online_search("test query")
+    result = perform_online_search("test query")
 
-        # Verify it tried to load from cache
-        mock_cache.load_cache.assert_called_once()
-        # Verify it saved to cache on success
-        mock_cache.save_cache.assert_called_once()
-        # Verify the number of search attempts
-        assert mock_instance.text.call_count == 3
-        # Verify the number of sleeps for the failed attempts
-        assert mock_sleep.call_count == 2
-        # Check that results contain the expected content
-        assert "Test Result" in result
-        assert "Test Content" in result
+    # Verify it tried to load from cache
+    mock_search_cache.load_cache.assert_called_once()
+    # Verify it saved to cache on success
+    mock_search_cache.save_cache.assert_called_once()
+    # Verify the number of search attempts
+    assert mock_tavily_client.search.call_count == 3
+    # Verify the number of sleeps for the failed attempts
+    assert mock_sleep.call_count == 2
+    # Check that results contain the expected content
+    assert "Test Result" in result
+    assert "Test Content" in result

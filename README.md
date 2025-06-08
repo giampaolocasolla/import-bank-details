@@ -12,7 +12,7 @@ This project is designed to import, process, and classify bank details from vari
 - **Expense Classification**:
   - **Primary Classification**: Uses OpenAI's GPT model to categorize expenses.
   - **Enhanced Classification**: Optionally integrates online search results to improve classification accuracy.
-- **Online Search Integration**: Fetches additional information from DuckDuckGo to augment expense classification.
+- **Online Search Integration**: Fetches additional information from Tavily to augment expense classification.
 - **Output to Excel**: Exports the processed and classified data to an Excel file for easy review and analysis.
 
 ## Requirements
@@ -20,7 +20,7 @@ This project is designed to import, process, and classify bank details from vari
 - **Python 3.11** or higher
 - **Poetry** for dependency management
 - **OpenAI API Key**
-- **DuckDuckGo Search Integration** (handled via the `duckduckgo_search` Python package)
+- **Tavily API Key**
 
 ## Installation
 
@@ -38,15 +38,13 @@ This project is designed to import, process, and classify bank details from vari
     ```
 
 3. **Set Up Your API Keys**:
-    - **OpenAI API Key**:
-        - Create a `.env` file in the project root.
-        - Add your OpenAI API key:
+    - Create a `.env` file in the project root.
+    - Add your OpenAI and Tavily API keys:
 
-          ```
-          OPENAI_API_KEY=your_openai_api_key_here
-          ```
-    - **DuckDuckGo Search**:
-        - No additional setup is required as the `duckduckgo_search` package does not require an API key.
+      ```
+      OPENAI_API_KEY="your_openai_api_key"
+      TAVILY_API_KEY="your_tavily_api_key"
+      ```
 
 ## Usage
 
@@ -56,9 +54,11 @@ Run the main script to process and classify the bank details:
 poetry run python main.py
 ```
 
-### Optional Online Search Enhancement
+### Classification with Online Search
 
-To enhance expense classification with online search results, enable the `include_online_search` option in your configuration or adjust the function call in your scripts.
+The application can perform online searches to gather additional context for classifying expenses. This feature is powered by Tavily and can be enabled by setting `include_online_search=True` when calling `classify_expenses`.
+The search results are cached to improve performance and reduce redundant searches.
+The cache is stored in `data/examples/search_cache.json`.
 
 Example:
 
@@ -127,7 +127,11 @@ Ensure that these files are correctly set up before running the script.
 
 ## Expense Classification
 
-The project uses OpenAI's GPT model to classify expenses into primary and secondary categories. The classification is based on the expense name, amount, and other details. With the optional online search functionality, the classification process can be augmented with additional context fetched from DuckDuckGo, enhancing accuracy for ambiguous or less common expense names.
+The project uses OpenAI's GPT model to classify expenses into primary and secondary categories. The classification is based on the expense name, amount, and other details. With the optional online search functionality, the classification process can be augmented with additional context fetched from Tavily, enhancing accuracy for ambiguous or less common expense names.
+
+### Classification Examples
+
+The `data/examples` directory contains a CSV file with example classifications. This file is used to provide few-shot examples to the language model, which improves the accuracy of the classification.
 
 ## License
 

@@ -8,11 +8,10 @@ from typing import Any, Dict, List, Optional, Set, Type, cast
 
 import pandas as pd
 from dotenv import load_dotenv
-from duckduckgo_search import DDGS
-from duckduckgo_search.exceptions import DuckDuckGoSearchException, RatelimitException
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from pydantic import BaseModel
+from tavily import TavilyClient
 
 from import_bank_details.structured_output import ExpenseEntry, ExpenseInput, ExpenseOutput, ExpenseType
 from import_bank_details.utils import load_config
@@ -27,7 +26,12 @@ load_dotenv()
 if "OPENAI_API_KEY" not in os.environ:
     raise ValueError("OPENAI_API_KEY environment variable is not set")
 
+# Verify that the Tavily API key environment variable is set
+if "TAVILY_API_KEY" not in os.environ:
+    raise ValueError("TAVILY_API_KEY environment variable is not set")
+
 client = OpenAI()
+tavily_client = TavilyClient()
 
 # Load LLM configuration from YAML file
 config_llm = load_config("config_llm.yaml")
@@ -107,11 +111,11 @@ def create_nested_category_string(response_format: Type[BaseModel]) -> str:
 
 
 class SearchCache:
-    def __init__(self, max_retries: int = 3, initial_delay: float = 1.0):
+    def __init__(self, max_retries: int = 3, initial_delay: float = 2.0):
         self.max_retries: int = max_retries
         self.initial_delay: float = initial_delay
         self.last_request_time: float = 0.0  # Initialize as float
-        self.min_request_interval: float = 2.0
+        self.min_request_interval: float = 4.0
 
     def get_cache_path(self, custom_path: Optional[Path] = None) -> Path:
         cache_dir = custom_path or Path("data/examples")
@@ -141,15 +145,15 @@ class SearchCache:
         self.last_request_time = time.time()
 
 
-def perform_online_search(
-    expense_name: str, region: str = "de-de", max_results: int = 2, cache_path: Optional[Path] = None
-) -> str:
+search_cache = SearchCache()
+
+
+def perform_online_search(expense_name: str, max_results: int = 2, cache_path: Optional[Path] = None) -> str:
     """
-    Search for expense details using DuckDuckGo with caching and rate limiting.
+    Search for expense details using Tavily with caching and rate limiting.
 
     Args:
         expense_name (str): Raw expense name to search for
-        region (str, optional): Region code for search results. Defaults to "de-de".
         max_results (int, optional): Maximum number of search results. Defaults to 2.
         cache_path (Optional[Path], optional): Custom path for cache file. Defaults to None.
 
@@ -165,7 +169,6 @@ def perform_online_search(
         >>> perform_online_search("INVALID", cache_path=Path("/tmp/cache"))
         'No results found'
     """
-    search_cache = SearchCache()
     logger.info(f"Starting search for expense: '{expense_name}'")
 
     # Clean input
@@ -180,7 +183,7 @@ def perform_online_search(
         return "Invalid search term"
 
     # Check cache
-    cache_key = f"{cleaned_name}:{region}:{max_results}"
+    cache_key = f"{cleaned_name}:{max_results}"
     cache = search_cache.load_cache(cache_path)
 
     if cache_key in cache:
@@ -195,36 +198,24 @@ def perform_online_search(
             search_cache.rate_limit()
             logger.debug(f"Search attempt {attempt + 1} for: {cleaned_name}")
 
-            with DDGS() as ddgs:
-                search_results = list(ddgs.text(cleaned_name, region=region, max_results=max_results))
-
-                if search_results:
-                    search_results_str = "\n".join([json.dumps(result, ensure_ascii=False) for result in search_results])
-                    # Only cache successful results
-                    cache[cache_key] = search_results_str
-                    search_cache.save_cache(cache, cache_path)
-                    logger.info(f"Successfully found and cached {len(search_results)} results for: {cleaned_name}")
-                    return search_results_str
-
-                logger.warning(f"No results found for '{cleaned_name}'")
-                return "No results found"
-
-        except RatelimitException as e:
-            delay = search_cache.initial_delay * (2**attempt)
-            logger.warning(
-                f"Rate limit exceeded for '{cleaned_name}'. "
-                f"Attempt {attempt + 1}/{search_cache.max_retries}. "
-                f"Retrying in {delay}s. Error: {e}"
+            search_results = tavily_client.search(
+                query=cleaned_name,
+                search_depth="basic",
+                max_results=max_results,
+                country="germany",
             )
-            time.sleep(delay)
-        except DuckDuckGoSearchException as e:
-            delay = search_cache.initial_delay * (2**attempt)
-            logger.warning(
-                f"A search error occurred for '{cleaned_name}'. "
-                f"Attempt {attempt + 1}/{search_cache.max_retries}. "
-                f"Retrying in {delay}s. Error: {e}"
-            )
-            time.sleep(delay)
+
+            if search_results and search_results.get("results"):
+                search_results_str = json.dumps(search_results["results"], ensure_ascii=False)
+                # Only cache successful results
+                cache[cache_key] = search_results_str
+                search_cache.save_cache(cache, cache_path)
+                logger.info(f"Successfully found and cached {len(search_results['results'])} results for: {cleaned_name}")
+                return search_results_str
+
+            logger.warning(f"No results found for '{cleaned_name}'")
+            return "No results found"
+
         except Exception as e:
             delay = search_cache.initial_delay * (2**attempt)
             logger.warning(f"Search attempt {attempt + 1} failed for '{cleaned_name}': {str(e)}. Retrying in {delay}s")
