@@ -6,6 +6,9 @@ from unittest import mock
 from unittest.mock import MagicMock, mock_open, patch
 
 import pandas as pd
+import pytest
+from openai import OpenAI
+from tavily import TavilyClient
 
 from import_bank_details.classification import (
     SearchCache,
@@ -13,9 +16,20 @@ from import_bank_details.classification import (
     create_nested_category_string,
     get_classification,
     get_list_expenses,
+    get_openai_client,
+    get_tavily_client,
     perform_online_search,
 )
 from import_bank_details.structured_output import ExpenseEntry, ExpenseOutput, ExpenseType
+
+
+@pytest.fixture(autouse=True)
+def reset_clients():
+    """Reset the global clients before each test to ensure lazy initialization is tested."""
+    import import_bank_details.classification
+
+    import_bank_details.classification.client = None
+    import_bank_details.classification.tavily_client = None
 
 
 class MockParsedResponse:
@@ -475,3 +489,35 @@ def test_perform_online_search_retry_and_succeed(mock_get_tavily_client, mock_se
     # Check that results contain the expected content
     assert "Test Result" in result
     assert "Test Content" in result
+
+
+def test_get_openai_client_raises_error_if_key_is_missing(monkeypatch):
+    """Test that get_openai_client raises a ValueError if the API key is not set."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="OPENAI_API_KEY environment variable is not set"):
+        get_openai_client()
+
+
+def test_get_tavily_client_raises_error_if_key_is_missing(monkeypatch):
+    """Test that get_tavily_client raises a ValueError if the API key is not set."""
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="TAVILY_API_KEY environment variable is not set"):
+        get_tavily_client()
+
+
+def test_get_openai_client_returns_client(monkeypatch):
+    """Test that get_openai_client returns an OpenAI client instance."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test_key")
+    client = get_openai_client()
+    assert isinstance(client, OpenAI)
+    client2 = get_openai_client()
+    assert client is client2
+
+
+def test_get_tavily_client_returns_client(monkeypatch):
+    """Test that get_tavily_client returns a TavilyClient instance."""
+    monkeypatch.setenv("TAVILY_API_KEY", "test_key")
+    client = get_tavily_client()
+    assert isinstance(client, TavilyClient)
+    client2 = get_tavily_client()
+    assert client is client2
