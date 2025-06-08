@@ -66,9 +66,13 @@ def test_create_nested_category_string():
     assert "    - Fuel" in categories_str
 
 
-@mock.patch("import_bank_details.classification.client.beta.chat.completions.parse")
-def test_get_classification(mock_parse):
+@mock.patch("import_bank_details.classification.get_openai_client")
+def test_get_classification(mock_get_openai_client):
     """Test the get_classification function."""
+    # Set up mock for OpenAI client
+    mock_openai_client = MagicMock()
+    mock_get_openai_client.return_value = mock_openai_client
+
     # Define the expense input
     expense_input = {"Day": "01/01/2023", "Expense_name": "Supermarket", "Amount": "45.50", "Bank": "N26", "Comment": "Groceries"}
 
@@ -91,7 +95,7 @@ def test_get_classification(mock_parse):
     mock_output = ExpenseOutput(expense_type=expense_type)
 
     # Mock the OpenAI API call
-    mock_parse.return_value = MockParsedResponse(mock_output)
+    mock_openai_client.beta.chat.completions.parse.return_value = MockParsedResponse(mock_output)
 
     # Call the function
     response = get_classification(
@@ -111,8 +115,8 @@ def test_get_classification(mock_parse):
     assert response.subcategory == "Auchan"
 
     # Check if the parse method was called correctly
-    mock_parse.assert_called_once()
-    args, kwargs = mock_parse.call_args
+    mock_openai_client.beta.chat.completions.parse.assert_called_once()
+    args, kwargs = mock_openai_client.beta.chat.completions.parse.call_args
 
     # Check the model name
     assert kwargs["model"] == "gpt-4o-mini"
@@ -348,9 +352,13 @@ def test_search_cache_rate_limit():
 
 
 @patch("import_bank_details.classification.search_cache", new_callable=MagicMock)
-@patch("import_bank_details.classification.tavily_client")
-def test_perform_online_search_basic(mock_tavily_client, mock_search_cache):
+@patch("import_bank_details.classification.get_tavily_client")
+def test_perform_online_search_basic(mock_get_tavily_client, mock_search_cache):
     """Test the perform_online_search function with basic functionality."""
+    # Set up mock for Tavily client
+    mock_tavily_client = MagicMock()
+    mock_get_tavily_client.return_value = mock_tavily_client
+
     # Set up search results
     mock_results = {"results": [{"title": "Test Result", "content": "Test Content"}]}
     mock_tavily_client.search.return_value = mock_results
@@ -386,10 +394,12 @@ def test_perform_online_search_cached(mock_search_cache):
 
 
 @patch("import_bank_details.classification.search_cache", new_callable=MagicMock)
-@patch("import_bank_details.classification.tavily_client")
-def test_perform_online_search_empty_results(mock_tavily_client, mock_search_cache):
+@patch("import_bank_details.classification.get_tavily_client")
+def test_perform_online_search_empty_results(mock_get_tavily_client, mock_search_cache):
     """Test the perform_online_search function with empty results."""
     # Set up mock for Tavily with empty results
+    mock_tavily_client = MagicMock()
+    mock_get_tavily_client.return_value = mock_tavily_client
     mock_tavily_client.search.return_value = {"results": []}
 
     mock_search_cache.load_cache.return_value = {}
@@ -406,10 +416,12 @@ def test_perform_online_search_empty_results(mock_tavily_client, mock_search_cac
 
 @patch("time.sleep", return_value=None)
 @patch("import_bank_details.classification.search_cache", new_callable=MagicMock)
-@patch("import_bank_details.classification.tavily_client")
-def test_perform_online_search_retry_and_fail(mock_tavily_client, mock_search_cache, mock_sleep):
+@patch("import_bank_details.classification.get_tavily_client")
+def test_perform_online_search_retry_and_fail(mock_get_tavily_client, mock_search_cache, mock_sleep):
     """Test the perform_online_search function with retry logic for failures."""
     # Set up mock for Tavily to always raise an exception
+    mock_tavily_client = MagicMock()
+    mock_get_tavily_client.return_value = mock_tavily_client
     mock_tavily_client.search.side_effect = Exception("API limit exceeded")
 
     mock_search_cache.load_cache.return_value = {}
@@ -433,10 +445,12 @@ def test_perform_online_search_retry_and_fail(mock_tavily_client, mock_search_ca
 
 @patch("time.sleep", return_value=None)
 @patch("import_bank_details.classification.search_cache", new_callable=MagicMock)
-@patch("import_bank_details.classification.tavily_client")
-def test_perform_online_search_retry_and_succeed(mock_tavily_client, mock_search_cache, mock_sleep):
+@patch("import_bank_details.classification.get_tavily_client")
+def test_perform_online_search_retry_and_succeed(mock_get_tavily_client, mock_search_cache, mock_sleep):
     """Test the perform_online_search function with retry logic that succeeds."""
     # Set up mock for Tavily to fail twice, then succeed
+    mock_tavily_client = MagicMock()
+    mock_get_tavily_client.return_value = mock_tavily_client
     mock_results = {"results": [{"title": "Test Result", "content": "Test Content"}]}
     mock_tavily_client.search.side_effect = [
         Exception("API limit exceeded"),

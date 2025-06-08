@@ -22,19 +22,33 @@ logger = logging.getLogger(__name__)
 # Load environment variables from a .env file
 load_dotenv()
 
-# Verify that the OpenAI API key environment variable is set
-if "OPENAI_API_KEY" not in os.environ:
-    raise ValueError("OPENAI_API_KEY environment variable is not set")
-
-# Verify that the Tavily API key environment variable is set
-if "TAVILY_API_KEY" not in os.environ:
-    raise ValueError("TAVILY_API_KEY environment variable is not set")
-
-client = OpenAI()
-tavily_client = TavilyClient()
+# client = OpenAI()
+# tavily_client = TavilyClient()
+client: Optional[OpenAI] = None
+tavily_client: Optional[TavilyClient] = None
 
 # Load LLM configuration from YAML file
 config_llm = load_config("config_llm.yaml")
+
+
+def get_openai_client() -> OpenAI:
+    """Get the OpenAI client, initializing it if necessary."""
+    global client
+    if client is None:
+        if "OPENAI_API_KEY" not in os.environ:
+            raise ValueError("OPENAI_API_KEY environment variable is not set")
+        client = OpenAI()
+    return client
+
+
+def get_tavily_client() -> TavilyClient:
+    """Get the Tavily client, initializing it if necessary."""
+    global tavily_client
+    if tavily_client is None:
+        if "TAVILY_API_KEY" not in os.environ:
+            raise ValueError("TAVILY_API_KEY environment variable is not set")
+        tavily_client = TavilyClient()
+    return tavily_client
 
 
 # %%
@@ -198,7 +212,8 @@ def perform_online_search(expense_name: str, max_results: int = 2, cache_path: O
             search_cache.rate_limit()
             logger.debug(f"Search attempt {attempt + 1} for: {cleaned_name}")
 
-            search_results = tavily_client.search(
+            tavily = get_tavily_client()
+            search_results = tavily.search(
                 query=cleaned_name,
                 search_depth="basic",
                 max_results=max_results,
@@ -279,7 +294,8 @@ def get_classification(
     messages.append({"role": "user", "content": user_message_content})
 
     try:
-        response = client.beta.chat.completions.parse(
+        openai_client = get_openai_client()
+        response = openai_client.beta.chat.completions.parse(
             model=model_name,
             messages=messages,
             temperature=temperature,
