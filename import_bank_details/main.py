@@ -290,7 +290,13 @@ def main() -> None:
 
         # Classify the expenses with OpenAI
         logger.info("Classifying expenses with OpenAI.")
-        df = classify_expenses(df=df, df_examples=df_examples, include_categories_in_prompt=True, include_online_search=True)
+        df = classify_expenses(
+            df=df,
+            df_examples=df_examples,
+            include_categories_in_prompt=True,
+            include_online_search=True,
+            max_workers=50,
+        )
         logger.info("Classification complete.")
 
         # Save the processed data to an Excel file in the output directory

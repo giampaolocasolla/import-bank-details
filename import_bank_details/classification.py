@@ -15,6 +15,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from pydantic import BaseModel
 from tavily import TavilyClient
 from tqdm import tqdm
+from tqdm.contrib.logging import tqdm_logging_redirect
 
 from import_bank_details.structured_output import ExpenseEntry, ExpenseInput, ExpenseOutput, ExpenseType
 from import_bank_details.utils import load_config
@@ -400,6 +401,7 @@ def classify_expenses(
     response_format: Type[ExpenseOutput] = ExpenseOutput,
     include_categories_in_prompt: bool = False,
     include_online_search: bool = False,
+    max_workers: int = 50,
 ) -> pd.DataFrame:
     """
     Classify expenses in the given DataFrame using example data and OpenAI's language model.
@@ -418,6 +420,7 @@ def classify_expenses(
             Defaults to ExpenseOutput.
         include_categories_in_prompt (bool, optional): If True, appends the category list to the system prompt.
         include_online_search (bool, optional): If True, appends online search results to the user's message.
+        max_workers (int, optional): The maximum number of workers for parallel processing. Defaults to 50.
 
     Returns:
         pd.DataFrame: A new DataFrame containing the original expense data along with
@@ -447,7 +450,7 @@ def classify_expenses(
     # Prepare the list to store classification results
     classification_results = []
 
-    with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor(max_workers=max_workers) as executor, tqdm_logging_redirect(desc="Classifying expenses"):
         future_to_expense = {
             executor.submit(
                 _classify_single_expense,
