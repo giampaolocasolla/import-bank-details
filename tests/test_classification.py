@@ -6,6 +6,7 @@ from unittest import mock
 from unittest.mock import MagicMock, mock_open, patch
 
 import pandas as pd
+from duckduckgo_search.exceptions import DuckDuckGoSearchException, RatelimitException
 
 from import_bank_details.classification import (
     SearchCache,
@@ -416,3 +417,70 @@ def test_perform_online_search_empty_results(mock_ddgs):
 
         # Check that result is the expected "not found" message
         assert result == "No results found"
+
+
+@patch("time.sleep", return_value=None)
+@patch("import_bank_details.classification.DDGS")
+def test_perform_online_search_retry_and_fail(mock_ddgs, mock_sleep):
+    """Test the perform_online_search function with retry logic for failures."""
+    # Set up mock for DDGS to always raise an exception
+    mock_instance = MagicMock()
+    mock_instance.text.side_effect = RatelimitException("Rate limit exceeded")
+    mock_ddgs.return_value.__enter__.return_value = mock_instance
+
+    with patch("import_bank_details.classification.SearchCache") as mock_cache_class:
+        mock_cache = MagicMock()
+        mock_cache.load_cache.return_value = {}
+        # Set max_retries to a specific value for the test
+        mock_cache.max_retries = 3
+        mock_cache.initial_delay = 0.1
+        mock_cache_class.return_value = mock_cache
+
+        result = perform_online_search("test query")
+
+        # Verify it tried to load from cache
+        mock_cache.load_cache.assert_called_once()
+        # Verify it never saved to cache
+        mock_cache.save_cache.assert_not_called()
+        # Verify the number of search attempts
+        assert mock_instance.text.call_count == 3
+        # Verify the number of sleeps
+        assert mock_sleep.call_count == 3
+        # Check for the final error message
+        assert result == "Online search failed after multiple attempts"
+
+
+@patch("time.sleep", return_value=None)
+@patch("import_bank_details.classification.DDGS")
+def test_perform_online_search_retry_and_succeed(mock_ddgs, mock_sleep):
+    """Test the perform_online_search function with retry logic that succeeds."""
+    # Set up mock for DDGS to fail twice, then succeed
+    mock_instance = MagicMock()
+    mock_results = [{"title": "Test Result", "body": "Test Content"}]
+    mock_instance.text.side_effect = [
+        RatelimitException("Rate limit exceeded"),
+        DuckDuckGoSearchException("Search error"),
+        mock_results,
+    ]
+    mock_ddgs.return_value.__enter__.return_value = mock_instance
+
+    with patch("import_bank_details.classification.SearchCache") as mock_cache_class:
+        mock_cache = MagicMock()
+        mock_cache.load_cache.return_value = {}
+        mock_cache.max_retries = 3
+        mock_cache.initial_delay = 0.1
+        mock_cache_class.return_value = mock_cache
+
+        result = perform_online_search("test query")
+
+        # Verify it tried to load from cache
+        mock_cache.load_cache.assert_called_once()
+        # Verify it saved to cache on success
+        mock_cache.save_cache.assert_called_once()
+        # Verify the number of search attempts
+        assert mock_instance.text.call_count == 3
+        # Verify the number of sleeps for the failed attempts
+        assert mock_sleep.call_count == 2
+        # Check that results contain the expected content
+        assert "Test Result" in result
+        assert "Test Content" in result

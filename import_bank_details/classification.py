@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Set, Type, cast
 import pandas as pd
 from dotenv import load_dotenv
 from duckduckgo_search import DDGS
+from duckduckgo_search.exceptions import DuckDuckGoSearchException, RatelimitException
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from pydantic import BaseModel
@@ -208,6 +209,22 @@ def perform_online_search(
                 logger.warning(f"No results found for '{cleaned_name}'")
                 return "No results found"
 
+        except RatelimitException as e:
+            delay = search_cache.initial_delay * (2**attempt)
+            logger.warning(
+                f"Rate limit exceeded for '{cleaned_name}'. "
+                f"Attempt {attempt + 1}/{search_cache.max_retries}. "
+                f"Retrying in {delay}s. Error: {e}"
+            )
+            time.sleep(delay)
+        except DuckDuckGoSearchException as e:
+            delay = search_cache.initial_delay * (2**attempt)
+            logger.warning(
+                f"A search error occurred for '{cleaned_name}'. "
+                f"Attempt {attempt + 1}/{search_cache.max_retries}. "
+                f"Retrying in {delay}s. Error: {e}"
+            )
+            time.sleep(delay)
         except Exception as e:
             delay = search_cache.initial_delay * (2**attempt)
             logger.warning(f"Search attempt {attempt + 1} failed for '{cleaned_name}': {str(e)}. Retrying in {delay}s")
