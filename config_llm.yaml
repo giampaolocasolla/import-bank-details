@@ -1,5 +1,5 @@
 llm:
-  model_name: "gpt-4o-mini"
+  model_name: "gpt-4.1-mini"
   temperature_base: 0.0
   temperature_retry: 0.7
   timeout: 180
