@@ -129,12 +129,32 @@ def create_nested_category_string(response_format: Type[BaseModel]) -> str:
 
 
 class SearchCache:
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            with cls._lock:
+                # Another thread could have created the instance
+                # before we acquired the lock, so we check again.
+                if not cls._instance:
+                    cls._instance = super(SearchCache, cls).__new__(cls)
+        return cls._instance
+
     def __init__(self, max_retries: int = 3, initial_delay: float = 2.0):
-        self.max_retries: int = max_retries
-        self.initial_delay: float = initial_delay
-        self.last_request_time: float = 0.0  # Initialize as float
-        self.min_request_interval: float = 4.0
-        self.lock = threading.Lock()
+        # Ensure __init__ is only run once by checking for an attribute
+        if hasattr(self, "_initialized"):
+            return
+        with self._lock:
+            # Check again after acquiring the lock
+            if hasattr(self, "_initialized"):
+                return
+            self.max_retries: int = max_retries
+            self.initial_delay: float = initial_delay
+            self.last_request_time: float = 0.0
+            self.min_request_interval: float = 0.7  # 100 requests/min = ~0.6s/req. Add a small buffer.
+            self.cache_lock = threading.Lock()  # Lock specifically for cache read/write
+            self._initialized = True
 
     def get_cache_path(self, custom_path: Optional[Path] = None) -> Path:
         cache_dir = custom_path or Path("data/examples")
@@ -157,7 +177,7 @@ class SearchCache:
             json.dump(cache, f, ensure_ascii=False, indent=2)
 
     def rate_limit(self) -> None:
-        with self.lock:
+        with self._lock:
             current_time = time.time()
             elapsed = current_time - self.last_request_time
             if elapsed < self.min_request_interval:
@@ -204,7 +224,7 @@ def perform_online_search(expense_name: str, max_results: int = 2, cache_path: O
 
     # Check cache
     cache_key = f"{cleaned_name}:{max_results}"
-    with search_cache.lock:
+    with search_cache.cache_lock:
         cache = search_cache.load_cache(cache_path)
         if cache_key in cache:
             logger.info(f"Returning cached results for: {cleaned_name}")
@@ -235,7 +255,7 @@ def perform_online_search(expense_name: str, max_results: int = 2, cache_path: O
                 logger.warning(f"No results found for '{cleaned_name}'")
 
             # Only cache successful results
-            with search_cache.lock:
+            with search_cache.cache_lock:
                 cache = search_cache.load_cache(cache_path)
                 cache[cache_key] = search_result_str
                 search_cache.save_cache(cache, cache_path)
@@ -247,12 +267,7 @@ def perform_online_search(expense_name: str, max_results: int = 2, cache_path: O
             time.sleep(delay)
 
     logger.error(f"Search failed after {search_cache.max_retries} attempts for: {cleaned_name}")
-    failure_message = "Online search failed after multiple attempts"
-    with search_cache.lock:
-        cache = search_cache.load_cache(cache_path)
-        cache[cache_key] = failure_message
-        search_cache.save_cache(cache, cache_path)
-    return failure_message
+    return "Online search failed after multiple attempts"
 
 
 def get_classification(

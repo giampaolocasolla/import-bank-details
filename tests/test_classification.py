@@ -303,11 +303,7 @@ def test_search_cache_init():
     assert cache.max_retries == 3
     assert cache.initial_delay == 2.0
     assert cache.last_request_time == 0.0
-    assert cache.min_request_interval == 4.0
-
-    custom_cache = SearchCache(max_retries=5, initial_delay=2.0)
-    assert custom_cache.max_retries == 5
-    assert custom_cache.initial_delay == 2.0
+    assert cache.min_request_interval == 0.7
 
 
 def test_search_cache_get_cache_path(tmpdir):
@@ -458,9 +454,9 @@ def test_perform_online_search_retry_and_fail(mock_get_tavily_client, mock_searc
     result = perform_online_search("test query")
 
     # Verify it tried to load from cache
-    assert mock_search_cache.load_cache.call_count == 2
-    # Verify it saved the failure message to cache
-    mock_search_cache.save_cache.assert_called_once()
+    mock_search_cache.load_cache.assert_called_once()
+    # Verify it did not save the failure message to cache
+    mock_search_cache.save_cache.assert_not_called()
     # Verify the number of search attempts
     assert mock_tavily_client.search.call_count == 3
     # Verify the number of sleeps
