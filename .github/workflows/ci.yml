@@ -17,14 +17,13 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
-        with:
-          version: 1.6.1
-          virtualenvs-create: true
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "${HOME}/.local/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
-        run: poetry install
+        run: uv sync
 
       - name: Setup test environment
         run: |
@@ -32,22 +31,22 @@ jobs:
           echo "OPENAI_API_KEY=dummy-key-for-testing" > .env
 
       - name: Check code formatting with Black
-        run: poetry run black --check .
+        run: uv run black --check .
 
       - name: Lint with flake8
-        run: poetry run flake8 .
+        run: uv run flake8 .
 
       - name: Check imports with isort
-        run: poetry run isort --check .
+        run: uv run isort --check .
 
       - name: Type check with mypy
-        run: poetry run mypy .
+        run: uv run mypy .
 
       - name: Run tests with pytest
-        run: poetry run pytest --cov=import_bank_details --cov-report=xml --cov-fail-under=80 --cov-config=.coveragerc
+        run: uv run pytest --cov=import_bank_details --cov-report=xml --cov-fail-under=80
 
       - name: Generate coverage report
-        run: poetry run pytest --cov=import_bank_details --cov-report=xml
+        run: uv run pytest --cov=import_bank_details --cov-report=xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

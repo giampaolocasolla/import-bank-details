@@ -1,19 +1,19 @@
 #!/bin/sh
 
-# Install Poetry
-curl -sSL https://install.python-poetry.org | python3 -
+# Install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Add Poetry to PATH for the current session
+# Add uv to PATH for the current session
 export PATH="$HOME/.local/bin:$PATH"
 
-# Install project dependencies using Poetry
+# Install project dependencies using uv
 pip install --upgrade pip
-poetry install --no-interaction --no-ansi
+uv sync
 
-# Optional: Check Python and Poetry versions
-echo "Check Python and Poetry versions"
+# Optional: Check Python and uv versions
+echo "Check Python and uv versions"
 which python
 python --version
-which poetry
-poetry --version
-poetry show
+which uv
+uv --version
+uv pip list
