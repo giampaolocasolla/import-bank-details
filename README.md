@@ -20,7 +20,7 @@ This project is designed to import, process, and classify bank details from vari
 ## Requirements
 
 - **Python 3.11** or higher
-- **Poetry** for dependency management
+- **uv** for dependency management
 - **OpenAI API Key**
 - **Tavily API Key**
 
@@ -33,13 +33,19 @@ This project is designed to import, process, and classify bank details from vari
     cd import-bank-details
     ```
 
-2. **Install Dependencies Using Poetry**:
+2. **Install uv (if not already installed)**:
 
     ```sh
-    poetry install
+    curl -LsSf https://astral.sh/uv/install.sh | sh
     ```
 
-3. **Set Up Your API Keys**:
+3. **Install Dependencies Using uv**:
+
+    ```sh
+    uv sync
+    ```
+
+4. **Set Up Your API Keys**:
     - Create a `.env` file in the project root.
     - Add your OpenAI and Tavily API keys:
 
@@ -53,7 +59,7 @@ This project is designed to import, process, and classify bank details from vari
 Run the main script to process and classify the bank details:
 
 ```sh
-poetry run python main.py
+uv run python -m import_bank_details.main
 ```
 
 ### Classification with Online Search
