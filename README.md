@@ -29,7 +29,7 @@ This project is designed to import, process, and classify bank details from vari
 1. **Clone the Repository**:
 
     ```sh
-    git clone https://github.com/yourusername/import-bank-details.git
+    git clone https://github.com/giampaolocasolla/import-bank-details.git
     cd import-bank-details
     ```
 
