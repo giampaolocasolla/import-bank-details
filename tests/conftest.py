@@ -39,6 +39,13 @@ def sample_config():
             "Remove": ["To EUR", "Payment from Giampaolo Casolla"],
             "Day": "%Y-%m-%d %H:%M:%S",
         },
+        "revolut_it": {
+            "import": {},
+            "columns_old": ["Data di inizio", "Descrizione", "Importo", "Bank", "Tipo"],
+            "columns_new": ["Day", "Expense_name", "Amount", "Bank", "Comment"],
+            "Remove": ["Accredita EUR", "Pagamento da GIAMPAOLO CASOLLA"],
+            "Day": "%Y-%m-%d %H:%M:%S",
+        },
     }
 
 

@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from import_bank_details.main import (
+    detect_bank_config,
     get_latest_files,
     import_data,
     process_data,
@@ -262,6 +263,54 @@ def test_validate_example_structure_dtype_mismatch():
     # Should raise a ValueError
     with pytest.raises(ValueError, match="Example file column dtypes do not match data"):
         validate_example_structure(df=df, df_examples=df_examples)
+
+
+def test_detect_bank_config_italian_revolut(tmpdir, sample_config):
+    """Test detect_bank_config with Italian Revolut CSV format."""
+    # Create a temporary CSV file with Italian headers
+    italian_csv = tmpdir.join("revolut_it.csv")
+    italian_csv.write("Tipo,Prodotto,Data di inizio,Data di completamento,Descrizione,Importo,Costo,Valuta,State,Saldo\n")
+
+    # Test detection
+    config_key = detect_bank_config(str(italian_csv), "revolut", sample_config)
+
+    # Should detect Italian format
+    assert config_key == "revolut_it"
+
+
+def test_detect_bank_config_english_revolut(tmpdir, sample_config):
+    """Test detect_bank_config with English Revolut CSV format."""
+    # Create a temporary CSV file with English headers
+    english_csv = tmpdir.join("revolut_en.csv")
+    english_csv.write("Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance\n")
+
+    # Test detection
+    config_key = detect_bank_config(str(english_csv), "revolut", sample_config)
+
+    # Should detect English format
+    assert config_key == "revolut"
+
+
+def test_detect_bank_config_non_revolut(tmpdir, sample_config):
+    """Test detect_bank_config with non-Revolut bank (should return bank_name unchanged)."""
+    # Create a temporary CSV file
+    n26_csv = tmpdir.join("n26.csv")
+    n26_csv.write("Value Date,Partner Name,Amount (EUR),Bank,Payment Reference\n")
+
+    # Test detection for n26 (should just return "n26")
+    config_key = detect_bank_config(str(n26_csv), "n26", sample_config)
+
+    # Should return the bank_name unchanged
+    assert config_key == "n26"
+
+
+def test_detect_bank_config_error_handling(sample_config):
+    """Test detect_bank_config error handling with invalid file path."""
+    # Test with non-existent file
+    config_key = detect_bank_config("non_existent_file.csv", "revolut", sample_config)
+
+    # Should fall back to bank_name on error
+    assert config_key == "revolut"
 
 
 def test_save_to_excel(tmpdir):

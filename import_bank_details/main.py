@@ -47,6 +47,44 @@ def get_latest_files(data_dir: str) -> Dict[str, str]:
     return file_data
 
 
+def detect_bank_config(file_path: str, bank_name: str, config: Dict) -> str:
+    """
+    Detect the correct bank configuration based on CSV file headers.
+
+    This is particularly useful for banks like Revolut that may export
+    files in different languages (e.g., English vs Italian).
+
+    Args:
+        file_path (str): Path to the CSV file.
+        bank_name (str): Name of the bank folder.
+        config (dict): Full configuration dictionary.
+
+    Returns:
+        str: The configuration key to use (e.g., 'revolut' or 'revolut_it').
+    """
+    # Only apply detection logic for Revolut files
+    if bank_name != "revolut":
+        return bank_name
+
+    try:
+        # Read only the first line to get headers
+        df_header = pd.read_csv(file_path, nrows=0)
+        columns = df_header.columns.tolist()
+
+        # Check if Italian columns are present
+        italian_columns = ["Data di inizio", "Descrizione", "Importo", "Tipo"]
+        if any(col in columns for col in italian_columns):
+            logger.info(f"Detected Italian format for {bank_name}, using 'revolut_it' config")
+            return "revolut_it"
+
+        logger.info(f"Detected English format for {bank_name}, using 'revolut' config")
+        return "revolut"
+
+    except Exception as e:
+        logger.warning(f"Could not detect format for {bank_name}, using default: {e}")
+        return bank_name
+
+
 def import_data(file_path: str, import_params: Optional[Dict] = None) -> pd.DataFrame:
     """
     Import data from a file with specified parameters.
@@ -245,14 +283,17 @@ def main() -> None:
     # Iterate through each file, process and clean the data according to the configuration
     for bank_name, file_path in file_data.items():
         try:
+            # Detect the correct config to use (handles format variations like Italian Revolut)
+            config_key = detect_bank_config(file_path, bank_name, config)
+
             # Import data with specified parameters if any, otherwise default to a basic read
             df_temp = import_data(
                 file_path=file_path,
-                import_params=config[bank_name].get("import"),
+                import_params=config[config_key].get("import"),
             )
 
             # Process and clean the data
-            df_temp = process_data(df=df_temp, config=config[bank_name], bank_name=bank_name)
+            df_temp = process_data(df=df_temp, config=config[config_key], bank_name=bank_name)
 
             # Combine the current file's data with the main dataframe
             df = pd.concat([df, df_temp], ignore_index=True)
