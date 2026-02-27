@@ -359,7 +359,7 @@ def main() -> None:
             openai_client=openai_client,
             system_prompt=config_llm["system_prompt"],
             model_name=config_llm["llm"]["model_name"],
-            temperature=config_llm["llm"]["temperature_base"],
+            temperature=config_llm["llm"].get("temperature_base"),
             include_categories_in_prompt=True,
             include_online_search=True,
             tavily_client=tavily_client,

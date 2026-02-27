@@ -17,10 +17,10 @@ from import_bank_details.structured_output import ExpenseEntry, ExpenseOutput, E
 
 
 class MockParsedResponse:
-    """Mock for the parsed response from OpenAI."""
+    """Mock for the parsed response from OpenAI Responses API."""
 
     def __init__(self, expense_type):
-        self.choices = [mock.MagicMock(message=mock.MagicMock(parsed=expense_type))]
+        self.output_parsed = expense_type
 
 
 def test_get_list_expenses(sample_processed_df):
@@ -90,7 +90,7 @@ def test_get_classification():
     mock_output = ExpenseOutput(expense_type=expense_type)
 
     # Mock the OpenAI API call
-    mock_openai_client.beta.chat.completions.parse.return_value = MockParsedResponse(mock_output)
+    mock_openai_client.responses.parse.return_value = MockParsedResponse(mock_output)
 
     # Call the function
     response = get_classification(
@@ -111,8 +111,8 @@ def test_get_classification():
     assert response.subcategory == "Auchan"
 
     # Check if the parse method was called correctly
-    mock_openai_client.beta.chat.completions.parse.assert_called_once()
-    args, kwargs = mock_openai_client.beta.chat.completions.parse.call_args
+    mock_openai_client.responses.parse.assert_called_once()
+    args, kwargs = mock_openai_client.responses.parse.call_args
 
     # Check the model name
     assert kwargs["model"] == "gpt-4o-mini"
@@ -120,11 +120,14 @@ def test_get_classification():
     # Check if the temperature was set correctly
     assert kwargs["temperature"] == 0.0
 
-    # Check if the example was included in the messages
-    assert len(kwargs["messages"]) > 1
-    assert kwargs["messages"][1]["role"] == "user"
+    # Check that system prompt is passed as instructions
+    assert kwargs["instructions"] == "Test prompt\n\n" + create_nested_category_string(ExpenseOutput)
+
+    # Check if the example was included in the input messages (no system message in list)
+    assert len(kwargs["input"]) > 1
+    assert kwargs["input"][0]["role"] == "user"
     assert (
-        kwargs["messages"][1]["content"]
+        kwargs["input"][0]["content"]
         == '{"Day": "02/01/2023", "Expense_name": "Lidl", "Amount": "30.25", "Bank": "Revolut", "Comment": ""}'
     )
 
@@ -298,7 +301,7 @@ def test_get_classification_retries(mock_sleep):
     mock_output = ExpenseOutput(expense_type=expense_type)
 
     # First call fails, second succeeds
-    mock_openai_client.beta.chat.completions.parse.side_effect = [
+    mock_openai_client.responses.parse.side_effect = [
         Exception("Temporary error"),
         MockParsedResponse(mock_output),
     ]
@@ -315,7 +318,7 @@ def test_get_classification_retries(mock_sleep):
 
     assert isinstance(result, ExpenseOutput)
     assert result.category == "Groceries"
-    assert mock_openai_client.beta.chat.completions.parse.call_count == 2
+    assert mock_openai_client.responses.parse.call_count == 2
     mock_sleep.assert_called_once()
 
 
@@ -323,7 +326,7 @@ def test_get_classification_retries(mock_sleep):
 def test_get_classification_retries_exhausted(mock_sleep):
     """Test that get_classification raises after all retries are exhausted."""
     mock_openai_client = MagicMock()
-    mock_openai_client.beta.chat.completions.parse.side_effect = Exception("Persistent error")
+    mock_openai_client.responses.parse.side_effect = Exception("Persistent error")
 
     expense_input = {"Day": "01/01/2023", "Expense_name": "Lidl", "Amount": "30.00", "Bank": "N26", "Comment": ""}
 
@@ -336,5 +339,5 @@ def test_get_classification_retries_exhausted(mock_sleep):
             temperature=0.0,
         )
 
-    assert mock_openai_client.beta.chat.completions.parse.call_count == 3
+    assert mock_openai_client.responses.parse.call_count == 3
     assert mock_sleep.call_count == 2

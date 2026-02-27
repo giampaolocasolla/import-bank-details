@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional, Set, Type, cast
 
 import pandas as pd
 from openai import OpenAI
-from openai.types.chat import ChatCompletionMessageParam
 from pydantic import BaseModel
 from tavily import TavilyClient
 from tqdm import tqdm
@@ -96,7 +95,7 @@ def get_classification(
     examples: Optional[List[Dict[str, Any]]] = None,
     system_prompt: str = "",
     model_name: str = "gpt-5-mini",
-    temperature: float = 0.0,
+    temperature: Optional[float] = None,
     response_format: Type[ExpenseOutput] = ExpenseOutput,
     include_categories_in_prompt: bool = False,
     include_online_search: bool = False,
@@ -104,14 +103,14 @@ def get_classification(
     search_cache: Optional[SearchCache] = None,
 ) -> ExpenseOutput:
     """
-    Get classification for an expense input using OpenAI's chat completion API.
+    Get classification for an expense input using OpenAI's Responses API.
 
     Args:
         expense_input (Dict[str, str]): The expense input to classify.
         examples (List[Dict[str, Any]], optional): List of example classifications. Defaults to an empty list.
-        system_prompt (str, optional): The system prompt to use. Defaults to the value from config_llm.
-        model_name (str, optional): The name of the model to use. Defaults to the value from config_llm.
-        temperature (float, optional): The temperature setting for the model. Defaults to the value from config_llm.
+        system_prompt (str, optional): The system prompt to use.
+        model_name (str, optional): The name of the model to use.
+        temperature (Optional[float], optional): The temperature setting. Not supported by all models.
         response_format (Type[ExpenseOutput], optional): The expected response format.
             Defaults to ExpenseOutput.
         include_categories_in_prompt (bool, optional): If True, appends the category list to the system prompt.
@@ -129,10 +128,10 @@ def get_classification(
     if examples is None:
         examples = []
 
-    messages: List[ChatCompletionMessageParam] = [{"role": "system", "content": system_prompt}]
+    input_messages: List[Dict[str, str]] = []
 
     for example in examples:
-        messages.extend(
+        input_messages.extend(
             [
                 {"role": "user", "content": json.dumps(example["input"])},
                 {"role": "assistant", "content": example["output"]},
@@ -147,18 +146,22 @@ def get_classification(
             search_text = perform_online_search(expense_name, tavily_client, search_cache)
             user_message_content += f"\n\nAdditional Information from Online Search:\n{search_text}"
 
-    messages.append({"role": "user", "content": user_message_content})
+    input_messages.append({"role": "user", "content": user_message_content})
+
+    parse_kwargs: Dict[str, Any] = {
+        "model": model_name,
+        "instructions": system_prompt,
+        "input": input_messages,
+        "text_format": response_format,
+    }
+    if temperature is not None:
+        parse_kwargs["temperature"] = temperature
 
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            response = openai_client.beta.chat.completions.parse(
-                model=model_name,
-                messages=messages,
-                temperature=temperature,
-                response_format=response_format,
-            )
-            return cast(ExpenseOutput, response.choices[0].message.parsed)
+            response = openai_client.responses.parse(**parse_kwargs)  # type: ignore[arg-type]
+            return cast(ExpenseOutput, response.output_parsed)
         except Exception as e:
             if attempt < max_retries - 1:
                 delay = 1.0 * (2**attempt)
@@ -178,7 +181,7 @@ def _classify_single_expense(
     examples: List[Dict[str, Any]],
     system_prompt: str,
     model_name: str,
-    temperature: float,
+    temperature: Optional[float],
     response_format: Type[ExpenseOutput],
     include_categories_in_prompt: bool,
     include_online_search: bool,
@@ -193,7 +196,7 @@ def _classify_single_expense(
         examples (List[Dict[str, Any]]): List of example classifications.
         system_prompt (str): The system prompt to use.
         model_name (str): The name of the model to use.
-        temperature (float): The temperature setting for the model.
+        temperature (Optional[float]): The temperature setting. Not supported by all models.
         response_format (Type[ExpenseOutput]): The expected response format.
         include_categories_in_prompt (bool): If True, appends the category list to the system prompt.
         include_online_search (bool): If True, appends online search results to the user's message.
@@ -253,7 +256,7 @@ def classify_expenses(
     openai_client: OpenAI,
     system_prompt: str = "",
     model_name: str = "gpt-5-mini",
-    temperature: float = 0.0,
+    temperature: Optional[float] = None,
     response_format: Type[ExpenseOutput] = ExpenseOutput,
     include_categories_in_prompt: bool = False,
     include_online_search: bool = False,
