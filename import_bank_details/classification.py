@@ -1,15 +1,10 @@
-# %%
 import json
 import logging
-import os
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Type, cast
 
 import pandas as pd
-from dotenv import load_dotenv
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from pydantic import BaseModel
@@ -17,45 +12,12 @@ from tavily import TavilyClient
 from tqdm import tqdm
 from tqdm.contrib.logging import tqdm_logging_redirect
 
+from import_bank_details.search import SearchCache, perform_online_search
 from import_bank_details.structured_output import ExpenseEntry, ExpenseInput, ExpenseOutput, ExpenseType
-from import_bank_details.utils import load_config
 
-# Get the logger instance
 logger = logging.getLogger(__name__)
 
-# Load environment variables from a .env file
-load_dotenv()
 
-# client = OpenAI()
-# tavily_client = TavilyClient()
-client: Optional[OpenAI] = None
-tavily_client: Optional[TavilyClient] = None
-
-# Load LLM configuration from YAML file
-config_llm = load_config("config_llm.yaml")
-
-
-def get_openai_client() -> OpenAI:
-    """Get the OpenAI client, initializing it if necessary."""
-    global client
-    if client is None:
-        if "OPENAI_API_KEY" not in os.environ:
-            raise ValueError("OPENAI_API_KEY environment variable is not set")
-        client = OpenAI()
-    return client
-
-
-def get_tavily_client() -> TavilyClient:
-    """Get the Tavily client, initializing it if necessary."""
-    global tavily_client
-    if tavily_client is None:
-        if "TAVILY_API_KEY" not in os.environ:
-            raise ValueError("TAVILY_API_KEY environment variable is not set")
-        tavily_client = TavilyClient()
-    return tavily_client
-
-
-# %%
 def get_list_expenses(df: pd.DataFrame, include_output: bool = True) -> List[ExpenseEntry]:
     """
     Convert a DataFrame of expenses into a list of ExpenseEntry instances.
@@ -128,157 +90,18 @@ def create_nested_category_string(response_format: Type[BaseModel]) -> str:
     return categories_str
 
 
-class SearchCache:
-    _instance = None
-    _lock = threading.Lock()
-
-    def __new__(cls, *args, **kwargs):
-        if not cls._instance:
-            with cls._lock:
-                # Another thread could have created the instance
-                # before we acquired the lock, so we check again.
-                if not cls._instance:
-                    cls._instance = super(SearchCache, cls).__new__(cls)
-        return cls._instance
-
-    def __init__(self, max_retries: int = 3, initial_delay: float = 2.0):
-        # Ensure __init__ is only run once by checking for an attribute
-        if hasattr(self, "_initialized"):
-            return
-        with self._lock:
-            # Check again after acquiring the lock
-            if hasattr(self, "_initialized"):
-                return
-            self.max_retries: int = max_retries
-            self.initial_delay: float = initial_delay
-            self.last_request_time: float = 0.0
-            self.min_request_interval: float = 0.7  # 100 requests/min = ~0.6s/req. Add a small buffer.
-            self.cache_lock = threading.Lock()  # Lock specifically for cache read/write
-            self._initialized = True
-
-    def get_cache_path(self, custom_path: Optional[Path] = None) -> Path:
-        cache_dir = custom_path or Path("data/examples")
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        return cache_dir / "search_cache.json"
-
-    def load_cache(self, cache_path: Optional[Path] = None) -> Dict[str, str]:
-        path = self.get_cache_path(cache_path)
-        if path.exists():
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except json.JSONDecodeError:
-                logger.warning("Cache file corrupted, creating new cache")
-        return {}
-
-    def save_cache(self, cache: Dict[str, str], cache_path: Optional[Path] = None):
-        path = self.get_cache_path(cache_path)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(cache, f, ensure_ascii=False, indent=2)
-
-    def rate_limit(self) -> None:
-        with self._lock:
-            current_time = time.time()
-            elapsed = current_time - self.last_request_time
-            if elapsed < self.min_request_interval:
-                time.sleep(self.min_request_interval - elapsed)
-            self.last_request_time = time.time()
-
-
-search_cache = SearchCache()
-
-
-def perform_online_search(expense_name: str, max_results: int = 2, cache_path: Optional[Path] = None) -> str:
-    """
-    Search for expense details using Tavily with caching and rate limiting.
-
-    Args:
-        expense_name (str): Raw expense name to search for
-        max_results (int, optional): Maximum number of search results. Defaults to 2.
-        cache_path (Optional[Path], optional): Custom path for cache file. Defaults to None.
-
-    Returns:
-        str: JSON-formatted search results string or error message.
-            Success: JSON string containing search results
-            Failure: Error message as string
-
-    Examples:
-        >>> perform_online_search("Coffee Shop Berlin")
-        '{"title": "Best Coffee Shops in Berlin", ...}'
-
-        >>> perform_online_search("INVALID", cache_path=Path("/tmp/cache"))
-        'Invalid search term'
-    """
-    logger.info(f"Starting search for expense: '{expense_name}'")
-
-    # Clean input
-    texts_to_remove = ["SumUp  *", "PAYPAL *", "LSP*", "CRV*", "PAY.nl*", "UZR*", "luca "]
-    cleaned_name = expense_name
-    for text in texts_to_remove:
-        cleaned_name = cleaned_name.replace(text, "")
-    cleaned_name = cleaned_name.strip()
-
-    if not cleaned_name:
-        logger.warning(f"Invalid search term after cleaning: {expense_name}")
-        return "Invalid search term"
-
-    # Check cache
-    cache_key = f"{cleaned_name}:{max_results}"
-    with search_cache.cache_lock:
-        cache = search_cache.load_cache(cache_path)
-        if cache_key in cache:
-            logger.info(f"Returning cached results for: {cleaned_name}")
-            return cache[cache_key]
-
-    logger.info(f"Performing online search as no cached values for: {cleaned_name}")
-
-    # Implement exponential backoff
-    for attempt in range(search_cache.max_retries):
-        try:
-            search_cache.rate_limit()
-            logger.debug(f"Search attempt {attempt + 1} for: {cleaned_name}")
-
-            tavily = get_tavily_client()
-            search_results = tavily.search(
-                query=cleaned_name,
-                search_depth="basic",
-                max_results=max_results,
-                country="germany",
-            )
-
-            search_result_str: str
-            if search_results and search_results.get("results"):
-                search_result_str = json.dumps(search_results["results"], ensure_ascii=False)
-                logger.info(f"Successfully found and cached {len(search_results['results'])} results for: {cleaned_name}")
-            else:
-                search_result_str = "No results found"
-                logger.warning(f"No results found for '{cleaned_name}'")
-
-            # Only cache successful results
-            with search_cache.cache_lock:
-                cache = search_cache.load_cache(cache_path)
-                cache[cache_key] = search_result_str
-                search_cache.save_cache(cache, cache_path)
-            return search_result_str
-
-        except Exception as e:
-            delay = search_cache.initial_delay * (2**attempt)
-            logger.warning(f"Search attempt {attempt + 1} failed for '{cleaned_name}': {str(e)}. Retrying in {delay}s")
-            time.sleep(delay)
-
-    logger.error(f"Search failed after {search_cache.max_retries} attempts for: {cleaned_name}")
-    return "Online search failed after multiple attempts"
-
-
 def get_classification(
     expense_input: Dict[str, str],
-    examples: List[Dict[str, Any]] = [],
-    system_prompt: str = config_llm["system_prompt"],
-    model_name: str = config_llm["llm"]["model_name"],
-    temperature: float = config_llm["llm"]["temperature_base"],
+    openai_client: OpenAI,
+    examples: Optional[List[Dict[str, Any]]] = None,
+    system_prompt: str = "",
+    model_name: str = "gpt-5-mini",
+    temperature: float = 0.0,
     response_format: Type[ExpenseOutput] = ExpenseOutput,
     include_categories_in_prompt: bool = False,
     include_online_search: bool = False,
+    tavily_client: Optional[TavilyClient] = None,
+    search_cache: Optional[SearchCache] = None,
 ) -> ExpenseOutput:
     """
     Get classification for an expense input using OpenAI's chat completion API.
@@ -303,6 +126,9 @@ def get_classification(
         # Append the categories to the system prompt
         system_prompt += "\n\n" + categories_str
 
+    if examples is None:
+        examples = []
+
     messages: List[ChatCompletionMessageParam] = [{"role": "system", "content": system_prompt}]
 
     for example in examples:
@@ -315,31 +141,40 @@ def get_classification(
 
     user_message_content = json.dumps(expense_input)
 
-    if include_online_search:
+    if include_online_search and tavily_client is not None and search_cache is not None:
         expense_name = expense_input.get("Expense_name", "")
         if expense_name:
-            search_text = perform_online_search(expense_name)
+            search_text = perform_online_search(expense_name, tavily_client, search_cache)
             user_message_content += f"\n\nAdditional Information from Online Search:\n{search_text}"
 
     messages.append({"role": "user", "content": user_message_content})
 
-    try:
-        openai_client = get_openai_client()
-        response = openai_client.beta.chat.completions.parse(
-            model=model_name,
-            messages=messages,
-            temperature=temperature,
-            response_format=response_format,
-        )
-        return cast(ExpenseOutput, response.choices[0].message.parsed)
-    except Exception as e:
-        logger.error(f"OpenAI API error: {str(e)}")
-        raise
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = openai_client.beta.chat.completions.parse(
+                model=model_name,
+                messages=messages,
+                temperature=temperature,
+                response_format=response_format,
+            )
+            return cast(ExpenseOutput, response.choices[0].message.parsed)
+        except Exception as e:
+            if attempt < max_retries - 1:
+                delay = 1.0 * (2**attempt)
+                logger.warning(f"OpenAI API attempt {attempt + 1} failed: {str(e)}. Retrying in {delay}s")
+                time.sleep(delay)
+            else:
+                logger.error(f"OpenAI API error after {max_retries} attempts: {str(e)}")
+                raise
+
+    # Unreachable: the loop always returns or raises on the last iteration
+    raise RuntimeError("Unexpected: retry loop exited without return or raise")
 
 
-# %%
 def _classify_single_expense(
     expense_entry: ExpenseEntry,
+    openai_client: OpenAI,
     examples: List[Dict[str, Any]],
     system_prompt: str,
     model_name: str,
@@ -347,6 +182,8 @@ def _classify_single_expense(
     response_format: Type[ExpenseOutput],
     include_categories_in_prompt: bool,
     include_online_search: bool,
+    tavily_client: Optional[TavilyClient] = None,
+    search_cache: Optional[SearchCache] = None,
 ) -> Dict[str, Any]:
     """
     Classify a single expense entry.
@@ -375,7 +212,7 @@ def _classify_single_expense(
         logger.warning(f"Invalid amount '{amount_str}' for expense: {expense_input}")
 
     if amount < 0:
-        logger.info("Skipping classification for negative amount")
+        logger.debug("Skipping classification for negative amount")
         return {
             **expense_input.model_dump(),
             "Primary": None,
@@ -385,6 +222,7 @@ def _classify_single_expense(
     try:
         expense_output = get_classification(
             expense_input=expense_input.model_dump(),
+            openai_client=openai_client,
             examples=examples,
             system_prompt=system_prompt,
             model_name=model_name,
@@ -392,6 +230,8 @@ def _classify_single_expense(
             response_format=response_format,
             include_categories_in_prompt=include_categories_in_prompt,
             include_online_search=include_online_search,
+            tavily_client=tavily_client,
+            search_cache=search_cache,
         )
         return {
             **expense_input.model_dump(),
@@ -410,13 +250,16 @@ def _classify_single_expense(
 def classify_expenses(
     df: pd.DataFrame,
     df_examples: pd.DataFrame,
-    system_prompt: str = config_llm["system_prompt"],
-    model_name: str = config_llm["llm"]["model_name"],
-    temperature: float = config_llm["llm"]["temperature_base"],
+    openai_client: OpenAI,
+    system_prompt: str = "",
+    model_name: str = "gpt-5-mini",
+    temperature: float = 0.0,
     response_format: Type[ExpenseOutput] = ExpenseOutput,
     include_categories_in_prompt: bool = False,
     include_online_search: bool = False,
-    max_workers: int = 50,
+    max_workers: int = 10,
+    tavily_client: Optional[TavilyClient] = None,
+    search_cache: Optional[SearchCache] = None,
 ) -> pd.DataFrame:
     """
     Classify expenses in the given DataFrame using example data and OpenAI's language model.
@@ -448,19 +291,19 @@ def classify_expenses(
 
     # Get the list of expenses to classify
     expenses = get_list_expenses(df=df, include_output=False)
-    logger.info(f"Got {len(expenses)} expenses to classify")
+    logger.debug(f"Got {len(expenses)} expenses to classify")
 
     # Get the list of example expenses
     examples_list = get_list_expenses(df=df_examples, include_output=True)
     examples = [
         {
             "input": ex.input.model_dump(),
-            "output": ex.output.expense_type.value,
+            "output": ex.output.expense_type.value,  # type: ignore[attr-defined]
         }
         for ex in examples_list
         if ex.output is not None
     ]
-    logger.info(f"Got {len(examples)} example expenses")
+    logger.debug(f"Got {len(examples)} example expenses")
 
     # Prepare the list to store classification results
     classification_results = []
@@ -470,6 +313,7 @@ def classify_expenses(
             executor.submit(
                 _classify_single_expense,
                 expense_entry,
+                openai_client,
                 examples,
                 system_prompt,
                 model_name,
@@ -477,6 +321,8 @@ def classify_expenses(
                 response_format,
                 include_categories_in_prompt,
                 include_online_search,
+                tavily_client,
+                search_cache,
             ): expense_entry
             for expense_entry in expenses
         }
@@ -498,7 +344,7 @@ def classify_expenses(
 
     # Convert the classification results into a DataFrame
     df_with_output = pd.DataFrame(classification_results)
-    logger.info(f"Created DataFrame with {len(df_with_output)} classified expenses")
+    logger.debug(f"Created DataFrame with {len(df_with_output)} classified expenses")
 
     # Ensure the column types match the original DataFrame
     for column in df.columns:
@@ -510,12 +356,12 @@ def classify_expenses(
                 if not df_with_output.empty:
                     df_with_output[column] = df_with_output[column].astype(df[column].dtype)
 
-    logger.info("Column types adjusted to match original DataFrame")
+    logger.debug("Column types adjusted to match original DataFrame")
 
     # Sort the DataFrame by 'Day', 'Amount', and 'Expense_name'
     if "Day" in df_with_output.columns:
         df_with_output = df_with_output.sort_values(by=["Day", "Amount", "Expense_name"]).reset_index(drop=True)
-        logger.info("DataFrame sorted by 'Day', 'Amount', and 'Expense_name'")
+        logger.debug("DataFrame sorted by 'Day', 'Amount', and 'Expense_name'")
 
     logger.info("Expense classification completed")
     return df_with_output

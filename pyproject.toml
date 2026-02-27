@@ -40,15 +40,20 @@ line-length = 130
 
 [tool.mypy]
 python_version = "3.11"
-warn_unused_configs = false
-disallow_untyped_defs = false
-warn_return_any = false
+warn_unused_configs = true
+disallow_untyped_defs = true
+warn_return_any = true
 ignore_missing_imports = true
-check_untyped_defs = false
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
 
 [tool.pytest.ini_options]
 markers = [
     "integration: marks tests as integration tests",
+    "e2e: marks tests as end-to-end tests",
 ]
 testpaths = ["tests"]
 python_files = "test_*.py"

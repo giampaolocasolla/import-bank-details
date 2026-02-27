@@ -1,0 +1,92 @@
+Housing:
+  - Rent
+  - CondoFee
+  - CondoAssurance
+  - Internet
+  - Furniture
+  - Move
+  - Cleaning
+  - HousingTaxes
+  - TV
+  - Electricity
+  - Phone
+
+Transport:
+  - Fuel
+  - Parking
+  - Revision
+  - Taxi
+  - Repair
+  - Tyres
+  - CarTaxes
+  - CarAssurance
+  - Bike
+  - Tolls
+  - PublicTransport
+
+Groceries:
+  - Auchan
+  - Delhaize
+  - Lidl
+  - Aldi
+  - Rewe
+  - Kaufland
+  - Amazon
+  - IkeaGroceries
+  - Barber
+  - OtherGroceries
+
+Travel:
+  - Naples
+  - SmallTrip
+  - LongTrip
+
+Out:
+  - Restaurants
+  - Bar
+  - TakeAway
+  - FoodDelivery
+  - Tip
+  - Leisure
+
+Leisure:
+  - Books
+  - Leisure
+  - Learning
+  - Games
+  - Tech
+  - OtherLeisure
+
+Health:
+  - Insurance
+  - Doctors
+  - Glasses
+  - Medicines
+  - Sport
+  - Safety
+  - Exams
+
+Gifts:
+  - Birthdays
+  - Christmas
+  - Weddings
+  - Donations
+  - Family
+  - OtherGifts
+
+Clothing:
+  - MrClothing
+  - OtherClothing
+
+Fees:
+  - Brokers
+  - Consulting
+  - Postal
+  - Banks
+  - Fines
+  - Assurance
+  - Tax
+  - OtherFees
+
+OtherExpenses:
+  - OtherExpenses

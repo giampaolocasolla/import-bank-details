@@ -4,38 +4,42 @@ import os
 from typing import Dict, List, Optional
 
 import pandas as pd
+from dotenv import load_dotenv
+from openai import OpenAI
+from tavily import TavilyClient
 
 from import_bank_details.classification import classify_expenses
 from import_bank_details.logger_setup import setup_logging
+from import_bank_details.search import SearchCache
 from import_bank_details.utils import load_config
 
 # Get the logger for this module
 logger = logging.getLogger(__name__)
 
 
-def get_latest_files(data_dir: str) -> Dict[str, str]:
+def get_latest_files(data_dir: str, base_dir: Optional[str] = None) -> Dict[str, str]:
     """
     Identify the most recently modified file in each data subfolder to process.
 
     Args:
-        data_dir (str): Path to the data directory.
+        data_dir: Path to the data directory.
+        base_dir: Base directory for resolving relative paths. Defaults to cwd.
 
     Returns:
-        dict: Dictionary with folder names as keys and latest file paths as values.
+        Dictionary with folder names as keys and latest file paths as values.
     """
-    cwd = os.getcwd()
+    cwd = base_dir or os.getcwd()
     folders_data = os.listdir(data_dir)
-    file_data = {}
+    file_data: Dict[str, str] = {}
     for folder in folders_data:
         folder_path = os.path.join(cwd, data_dir, folder)
         if folder == "examples":
-            # Only look for CSV files in examples folder
             files = glob.glob(os.path.join(folder_path, "*.csv"))
         else:
             files = glob.glob(os.path.join(folder_path, "*"))
 
         if files:
-            file_data[folder] = max(files, key=os.path.getctime)
+            file_data[folder] = max(files, key=os.path.getmtime)
         else:
             logger.warning(f"No files found in folder: {folder}")
 
@@ -99,13 +103,13 @@ def import_data(file_path: str, import_params: Optional[Dict] = None) -> pd.Data
     try:
         if import_params:
             df = pd.read_csv(file_path, **import_params)
-            logger.info(f"Data imported with parameters from {file_path}.")
+            logger.debug(f"Data imported with parameters from {file_path}.")
         else:
             df = pd.read_csv(file_path)
-            logger.info(f"Data imported without parameters from {file_path}.")
+            logger.debug(f"Data imported without parameters from {file_path}.")
     except UnicodeDecodeError:
         df = pd.read_excel(file_path)
-        logger.info(f"Data imported as Excel from {file_path}.")
+        logger.debug(f"Data imported as Excel from {file_path}.")
     except Exception as e:
         logger.error(f"Error importing data from {file_path}: {e}")
         raise
@@ -124,24 +128,26 @@ def process_data(df: pd.DataFrame, config: Dict, bank_name: str) -> pd.DataFrame
     Returns:
         pd.DataFrame: Processed data as a DataFrame.
     """
+    df = df.copy()
+
     # Assign the folder name to the 'Bank' column for identification
     if "Bank" in config["columns_old"]:
         df["Bank"] = bank_name
-        logger.info(f"Bank column set for {bank_name}.")
+        logger.debug(f"Bank column set for {bank_name}.")
 
     # Select and rename columns as per the new configuration mapping
     df = df[config["columns_old"]]
     df = df.rename(columns=dict(zip(config["columns_old"], config["columns_new"])))
-    logger.info(f"Columns selected and renamed for {bank_name}.")
+    logger.debug(f"Columns selected and renamed for {bank_name}.")
 
     # Call remove_unnecessary_expenses if the 'Remove' key exists in config
     if "Remove" in config:
         df = remove_unnecessary_expenses(df, config["Remove"])
-        logger.info(f"Unnecessary expenses removed for {bank_name}.")
+        logger.debug(f"Unnecessary expenses removed for {bank_name}.")
 
     # Parse the 'Day' column into datetime format as specified in the configuration
     df["Day"] = pd.to_datetime(df["Day"], format=config["Day"])
-    logger.info(f"Day column converted to datetime for {bank_name}.")
+    logger.debug(f"Day column converted to datetime for {bank_name}.")
 
     return df
 
@@ -265,11 +271,19 @@ def save_to_excel(df: pd.DataFrame, output_dir: str, folders_data: List[str]) ->
 
 def main() -> None:
     """Main function to orchestrate the data import, processing, and export."""
+    load_dotenv()
+
     # Set up logging
     setup_logging()
 
     # Load the configuration from the YAML file
     config = load_config(config_path="config_bank.yaml")
+    config_llm = load_config(config_path="config_llm.yaml")
+
+    # Initialize API clients
+    openai_client = OpenAI()
+    tavily_client = TavilyClient()
+    search_cache = SearchCache()
 
     # Identify the most recently modified file in each data subfolder to process
     file_data = get_latest_files(data_dir="data")
@@ -279,6 +293,7 @@ def main() -> None:
 
     # Initialize the dataframe that will hold all the data
     df = None
+    errors: Dict[str, str] = {}
 
     # Iterate through each file, process and clean the data according to the configuration
     for bank_name, file_path in file_data.items():
@@ -298,8 +313,14 @@ def main() -> None:
             # Combine the current file's data with the main dataframe
             df = pd.concat([df, df_temp], ignore_index=True)
         except Exception as e:
+            errors[bank_name] = str(e)
             logger.error(f"Error processing data for {bank_name}: {e}")
             continue
+
+    if errors:
+        if df is None:
+            raise RuntimeError(f"All banks failed to process: {errors}")
+        logger.warning(f"Some banks failed to process: {errors}")
 
     if df is not None:
         # Round down the 'Day' column to the nearest day
@@ -308,7 +329,8 @@ def main() -> None:
         # Sort the combined data for uniformity and easier analysis
         df = df.sort_values(by=["Day", "Expense_name", "Amount"])
 
-        # Convert the 'Amount' to a negative value to indicate expense
+        # Bank exports report expenses as positive values; negate them so that
+        # expenses are negative and income/refunds remain positive in the output.
         df["Amount"] = -df["Amount"]
 
         # Load example expenses to help the classifier if available
@@ -334,9 +356,14 @@ def main() -> None:
         df = classify_expenses(
             df=df,
             df_examples=df_examples,
+            openai_client=openai_client,
+            system_prompt=config_llm["system_prompt"],
+            model_name=config_llm["llm"]["model_name"],
+            temperature=config_llm["llm"]["temperature_base"],
             include_categories_in_prompt=True,
             include_online_search=True,
-            max_workers=50,
+            tavily_client=tavily_client,
+            search_cache=search_cache,
         )
         logger.info("Classification complete.")
 

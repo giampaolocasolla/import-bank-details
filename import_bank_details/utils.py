@@ -1,27 +1,33 @@
 import logging
-from typing import Dict
+from typing import Any, Dict
 
 import yaml
 
-# Get the logger instance
 logger = logging.getLogger(__name__)
 
 
-def load_config(config_path: str) -> Dict:
+def load_config(config_path: str) -> Dict[str, Any]:
     """
     Load the configuration from the YAML file.
 
     Args:
-        config_path (str): Path to the configuration YAML file.
+        config_path: Path to the configuration YAML file.
 
     Returns:
-        dict: Configuration dictionary.
+        Configuration dictionary.
+
+    Raises:
+        FileNotFoundError: If the config file does not exist.
+        yaml.YAMLError: If the YAML content is invalid.
     """
-    with open(config_path, "r", encoding="utf-8") as stream:
-        try:
+    try:
+        with open(config_path, "r", encoding="utf-8") as stream:
             config = yaml.safe_load(stream)
             logger.info("Configuration file loaded successfully.")
-            return config
-        except yaml.YAMLError as exc:
-            logger.error("Error loading configuration file:", exc)
-            raise
+            return config  # type: ignore[no-any-return]
+    except FileNotFoundError:
+        logger.error(f"Configuration file not found: {config_path}")
+        raise
+    except yaml.YAMLError as exc:
+        logger.error(f"Error loading configuration file: {exc}")
+        raise

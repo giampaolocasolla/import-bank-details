@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 import yaml
 
-from import_bank_details.structured_output import ExpenseEntry, ExpenseInput, ExpenseOutput, ExpenseType
+from import_bank_details.structured_output import ExpenseEntry, ExpenseInput, ExpenseOutput, ExpenseType  # noqa: F401
 
 
 @pytest.fixture
@@ -143,18 +143,14 @@ def sample_example_csv(sample_example_df, sample_data_dir):
 
 
 @pytest.fixture
-def mock_expense_entry():
-    """Create a mock expense entry."""
-    expense_input = ExpenseInput(Day="01/01/2023", Expense_name="Supermarket", Amount="45.50", Bank="N26", Comment="Groceries")
-
-    expense_type = None
-    for et in ExpenseType:
-        if et.value == "Groceries, Auchan":
-            expense_type = et
-            break
-
-    expense_output = None
-    if expense_type:
-        expense_output = ExpenseOutput(expense_type=expense_type)
-
-    return ExpenseEntry(input=expense_input, output=expense_output)
+def sample_llm_config():
+    """Create a sample LLM configuration dict."""
+    return {
+        "llm": {
+            "model_name": "gpt-4o-mini",
+            "temperature_base": 0.0,
+            "temperature_retry": 0.7,
+            "timeout": 180,
+        },
+        "system_prompt": "You are a helpful assistant that classifies expenses into categories and subcategories.",
+    }
