@@ -10,6 +10,7 @@ from import_bank_details.main import (
     detect_bank_config,
     get_latest_files,
     import_data,
+    main,
     process_data,
     process_examples,
     remove_unnecessary_expenses,
@@ -18,14 +19,13 @@ from import_bank_details.main import (
 )
 
 
-@pytest.mark.skip(reason="Path issues with mock directories")
 def test_get_latest_files(sample_data_dir, sample_n26_csv, sample_revolut_csv, sample_example_csv):
     """Test the get_latest_files function."""
-    # Call the function
-    with mock.patch("os.getcwd", return_value=os.path.dirname(sample_data_dir)):
-        file_data = get_latest_files(data_dir=os.path.basename(sample_data_dir))
+    file_data = get_latest_files(
+        data_dir=sample_data_dir,
+        base_dir=os.path.dirname(sample_data_dir),
+    )
 
-    # Check if the function returned the expected files
     assert "n26" in file_data
     assert "revolut" in file_data
     assert "examples" in file_data
@@ -34,17 +34,16 @@ def test_get_latest_files(sample_data_dir, sample_n26_csv, sample_revolut_csv, s
     assert os.path.basename(file_data["examples"]) == "examples_test.csv"
 
 
-@pytest.mark.skip(reason="Path issues with mock directories")
 def test_get_latest_files_empty_folder(sample_data_dir):
     """Test the get_latest_files function with an empty folder."""
-    # Create an empty data dir
     empty_data_dir = os.path.join(sample_data_dir, "empty_data")
     os.makedirs(empty_data_dir, exist_ok=True)
 
-    # Test with the empty directory
-    with mock.patch("os.getcwd", return_value=os.path.dirname(sample_data_dir)):
-        with pytest.raises(ValueError, match="No files found in any folder"):
-            get_latest_files(data_dir=os.path.basename(empty_data_dir))
+    with pytest.raises(ValueError, match="No files found in any folder"):
+        get_latest_files(
+            data_dir=empty_data_dir,
+            base_dir=os.path.dirname(sample_data_dir),
+        )
 
 
 def test_import_data_csv(sample_n26_csv):
@@ -354,3 +353,177 @@ def test_save_to_excel(tmpdir):
     # Day column should be formatted as strings in the Excel file
     # Check format matches DD/MM/YYYY
     assert df_read["Day"].iloc[0] == "01/01/2023"
+
+
+def test_process_data_does_not_mutate_input(sample_n26_df, sample_config):
+    """Test that process_data does not mutate the original DataFrame."""
+    original_columns = list(sample_n26_df.columns)
+    original_values = sample_n26_df.copy()
+
+    process_data(df=sample_n26_df, config=sample_config["n26"], bank_name="n26")
+
+    # Original df should not be modified
+    assert list(sample_n26_df.columns) == original_columns
+    pd.testing.assert_frame_equal(sample_n26_df, original_values)
+
+
+def test_main_all_banks_fail(sample_data_dir, sample_config):
+    """Test that main raises RuntimeError when all banks fail."""
+    with (
+        mock.patch("import_bank_details.main.load_config") as mock_load_config,
+        mock.patch("import_bank_details.main.setup_logging"),
+        mock.patch("import_bank_details.main.get_latest_files") as mock_get_latest_files,
+        mock.patch("import_bank_details.main.load_dotenv"),
+        mock.patch("import_bank_details.main.OpenAI"),
+        mock.patch("import_bank_details.main.TavilyClient"),
+        mock.patch("import_bank_details.main.SearchCache"),
+        mock.patch("import_bank_details.main.import_data") as mock_import_data,
+    ):
+
+        mock_load_config.side_effect = [
+            sample_config,
+            {"llm": {"model_name": "gpt-4o-mini", "temperature_base": 0.0}, "system_prompt": "Test"},
+        ]
+        mock_get_latest_files.return_value = {"n26": "/fake/n26.csv", "revolut": "/fake/revolut.csv"}
+        mock_import_data.side_effect = Exception("File not found")
+
+        with pytest.raises(RuntimeError, match="All banks failed to process"):
+            main()
+
+
+def test_main_partial_bank_failure(sample_data_dir, sample_n26_csv, sample_config):
+    """Test that main continues when some banks fail and warns."""
+    with (
+        mock.patch("import_bank_details.main.load_config") as mock_load_config,
+        mock.patch("import_bank_details.main.setup_logging"),
+        mock.patch("import_bank_details.main.get_latest_files") as mock_get_latest_files,
+        mock.patch("import_bank_details.main.load_dotenv"),
+        mock.patch("import_bank_details.main.OpenAI"),
+        mock.patch("import_bank_details.main.TavilyClient"),
+        mock.patch("import_bank_details.main.SearchCache"),
+        mock.patch("import_bank_details.main.classify_expenses") as mock_classify,
+        mock.patch("import_bank_details.main.save_to_excel") as mock_save,
+    ):
+
+        mock_load_config.side_effect = [
+            sample_config,
+            {"llm": {"model_name": "gpt-4o-mini", "temperature_base": 0.0}, "system_prompt": "Test"},
+        ]
+        mock_get_latest_files.return_value = {
+            "n26": sample_n26_csv,
+            "revolut": "/fake/nonexistent.csv",
+        }
+
+        # Make classify_expenses return a simple df
+        mock_classify.return_value = pd.DataFrame(
+            {
+                "Day": pd.to_datetime(["2023-01-01"]),
+                "Expense_name": ["Test"],
+                "Amount": [-10.0],
+                "Bank": ["n26"],
+                "Comment": [""],
+                "Primary": ["Groceries"],
+                "Secondary": ["Auchan"],
+            }
+        )
+
+        # Should not raise - partial failure is a warning
+        main()
+
+        mock_save.assert_called_once()
+
+
+def test_main_happy_path(
+    sample_data_dir, sample_n26_csv, sample_revolut_csv, sample_example_csv, sample_config, sample_llm_config
+):
+    """Test main function happy path with all components mocked."""
+    from import_bank_details.structured_output import ExpenseOutput, ExpenseType
+
+    expense_type = None
+    for et in ExpenseType:  # type: ignore[attr-defined]
+        if et.value == "Groceries, Auchan":
+            expense_type = et
+            break
+    mock_output = ExpenseOutput(expense_type=expense_type)
+
+    with (
+        mock.patch("import_bank_details.main.load_config") as mock_load_config,
+        mock.patch("import_bank_details.main.setup_logging"),
+        mock.patch("import_bank_details.main.get_latest_files") as mock_get_latest_files,
+        mock.patch("import_bank_details.main.load_dotenv"),
+        mock.patch("import_bank_details.main.OpenAI"),
+        mock.patch("import_bank_details.main.TavilyClient"),
+        mock.patch("import_bank_details.main.SearchCache"),
+        mock.patch("import_bank_details.classification.get_classification") as mock_classify,
+        mock.patch("import_bank_details.main.save_to_excel") as mock_save,
+    ):
+
+        mock_load_config.side_effect = [sample_config, sample_llm_config]
+        mock_get_latest_files.return_value = {
+            "n26": sample_n26_csv,
+            "revolut": sample_revolut_csv,
+            "examples": sample_example_csv,
+        }
+        mock_classify.return_value = mock_output
+
+        main()
+
+        mock_save.assert_called_once()
+        # Verify the DataFrame passed to save_to_excel has expected columns
+        saved_df = mock_save.call_args[0][0]
+        assert "Primary" in saved_df.columns
+        assert "Secondary" in saved_df.columns
+        assert "Day" in saved_df.columns
+
+
+def test_main_output_sort_order(
+    sample_data_dir, sample_n26_csv, sample_revolut_csv, sample_example_csv, sample_config, sample_llm_config
+):
+    """Test that the output DataFrame is sorted by Day, Amount, Expense_name."""
+    import threading
+
+    from import_bank_details.structured_output import ExpenseOutput, ExpenseType
+
+    expense_type_groceries = None
+    expense_type_restaurants = None
+    for et in ExpenseType:  # type: ignore[attr-defined]
+        if et.value == "Groceries, Auchan":
+            expense_type_groceries = et
+        elif et.value == "Out, Restaurants":
+            expense_type_restaurants = et
+
+    lock = threading.Lock()
+
+    def mock_classify_func(**kwargs):
+        with lock:
+            name = kwargs["expense_input"]["Expense_name"]
+            if "Restaurant" in name:
+                return ExpenseOutput(expense_type=expense_type_restaurants)
+            return ExpenseOutput(expense_type=expense_type_groceries)
+
+    with (
+        mock.patch("import_bank_details.main.load_config") as mock_load_config,
+        mock.patch("import_bank_details.main.setup_logging"),
+        mock.patch("import_bank_details.main.get_latest_files") as mock_get_latest_files,
+        mock.patch("import_bank_details.main.load_dotenv"),
+        mock.patch("import_bank_details.main.OpenAI"),
+        mock.patch("import_bank_details.main.TavilyClient"),
+        mock.patch("import_bank_details.main.SearchCache"),
+        mock.patch("import_bank_details.classification.get_classification") as mock_classify,
+        mock.patch("import_bank_details.main.save_to_excel") as mock_save,
+    ):
+
+        mock_load_config.side_effect = [sample_config, sample_llm_config]
+        mock_get_latest_files.return_value = {
+            "n26": sample_n26_csv,
+            "revolut": sample_revolut_csv,
+            "examples": sample_example_csv,
+        }
+        mock_classify.side_effect = mock_classify_func
+
+        main()
+
+        saved_df = mock_save.call_args[0][0]
+        # Verify sort order: Day ascending, then Amount, then Expense_name
+        days = saved_df["Day"].tolist()
+        assert days == sorted(days)

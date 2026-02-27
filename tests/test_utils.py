@@ -40,7 +40,6 @@ def test_load_config_file_not_found():
         load_config("non_existent_file.yaml")
 
 
-@pytest.mark.skip(reason="utils.load_config error logging needs to be fixed")
 def test_load_config_invalid_yaml(tmpdir):
     """Test load_config function raises yaml.YAMLError with invalid YAML."""
     # Create a temporary file with invalid YAML content

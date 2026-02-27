@@ -1,36 +1,19 @@
 """Tests for the classification module."""
 
 import threading
-import time
-from pathlib import Path
 from unittest import mock
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
-from openai import OpenAI
-from tavily import TavilyClient
 
 from import_bank_details.classification import (
-    SearchCache,
     classify_expenses,
     create_nested_category_string,
     get_classification,
     get_list_expenses,
-    get_openai_client,
-    get_tavily_client,
-    perform_online_search,
 )
 from import_bank_details.structured_output import ExpenseEntry, ExpenseOutput, ExpenseType
-
-
-@pytest.fixture(autouse=True)
-def reset_clients():
-    """Reset the global clients before each test to ensure lazy initialization is tested."""
-    import import_bank_details.classification
-
-    import_bank_details.classification.client = None
-    import_bank_details.classification.tavily_client = None
 
 
 class MockParsedResponse:
@@ -81,12 +64,10 @@ def test_create_nested_category_string():
     assert "    - Fuel" in categories_str
 
 
-@mock.patch("import_bank_details.classification.get_openai_client")
-def test_get_classification(mock_get_openai_client):
+def test_get_classification():
     """Test the get_classification function."""
     # Set up mock for OpenAI client
     mock_openai_client = MagicMock()
-    mock_get_openai_client.return_value = mock_openai_client
 
     # Define the expense input
     expense_input = {"Day": "01/01/2023", "Expense_name": "Supermarket", "Amount": "45.50", "Bank": "N26", "Comment": "Groceries"}
@@ -100,9 +81,8 @@ def test_get_classification(mock_get_openai_client):
     ]
 
     # Create a mock expense output
-    # Find the actual ExpenseType for Groceries, Auchan
     expense_type = None
-    for et in ExpenseType:
+    for et in ExpenseType:  # type: ignore[attr-defined]
         if et.value == "Groceries, Auchan":
             expense_type = et
             break
@@ -115,6 +95,7 @@ def test_get_classification(mock_get_openai_client):
     # Call the function
     response = get_classification(
         expense_input=expense_input,
+        openai_client=mock_openai_client,
         examples=examples,
         system_prompt="Test prompt",
         model_name="gpt-4o-mini",
@@ -175,11 +156,11 @@ def test_classify_expenses(mock_get_classification):
         }
     )
 
-    # Find the actual ExpenseType for Groceries, Auchan
+    # Find the actual ExpenseType values
     expense_type_groceries = None
     expense_type_restaurants = None
 
-    for et in ExpenseType:
+    for et in ExpenseType:  # type: ignore[attr-defined]
         if et.value == "Groceries, Auchan":
             expense_type_groceries = et
         elif et.value == "Out, Restaurants":
@@ -201,10 +182,13 @@ def test_classify_expenses(mock_get_classification):
 
     mock_get_classification.side_effect = side_effect
 
+    mock_openai_client = MagicMock()
+
     # Call classify_expenses
     result_df = classify_expenses(
         df=df,
         df_examples=df_examples,
+        openai_client=mock_openai_client,
         system_prompt="Test prompt",
         model_name="gpt-4o-mini",
         temperature=0.0,
@@ -237,7 +221,7 @@ def test_classify_expenses_skip_negative(mock_get_classification):
         {
             "Day": pd.to_datetime(["2023-01-01", "2023-01-02"]),
             "Expense_name": ["Supermarket", "Refund"],
-            "Amount": [45.50, -26.75],  # Negative amount for refund
+            "Amount": [45.50, -26.75],
             "Bank": ["N26", "N26"],
             "Comment": ["Groceries", "Product return"],
         }
@@ -258,7 +242,7 @@ def test_classify_expenses_skip_negative(mock_get_classification):
 
     # Find ExpenseType for Groceries, Auchan
     expense_type_groceries = None
-    for et in ExpenseType:
+    for et in ExpenseType:  # type: ignore[attr-defined]
         if et.value == "Groceries, Auchan":
             expense_type_groceries = et
             break
@@ -269,10 +253,13 @@ def test_classify_expenses_skip_negative(mock_get_classification):
     # Mock the get_classification function
     mock_get_classification.return_value = mock_output
 
+    mock_openai_client = MagicMock()
+
     # Call classify_expenses
     result_df = classify_expenses(
         df=df,
         df_examples=df_examples,
+        openai_client=mock_openai_client,
         system_prompt="Test prompt",
         model_name="gpt-4o-mini",
         temperature=0.0,
@@ -297,235 +284,57 @@ def test_classify_expenses_skip_negative(mock_get_classification):
     assert mock_get_classification.call_count == 1
 
 
-def test_search_cache_init():
-    """Test the SearchCache initialization."""
-    cache = SearchCache()
-    assert cache.max_retries == 3
-    assert cache.initial_delay == 2.0
-    assert cache.last_request_time == 0.0
-    assert cache.min_request_interval == 0.7
-
-
-def test_search_cache_get_cache_path(tmpdir):
-    """Test the get_cache_path method."""
-    cache = SearchCache()
-
-    # Test default path
-    default_path = cache.get_cache_path()
-    assert str(default_path).endswith("data/examples/search_cache.json")
-
-    # Test custom path
-    custom_dir = Path(tmpdir)
-    custom_path = cache.get_cache_path(custom_dir)
-    assert custom_path == custom_dir / "search_cache.json"
-    assert custom_dir.exists()
-
-
-def test_search_cache_load_cache():
-    """Test the load_cache method."""
-    cache = SearchCache()
-
-    # Test for non-existent file
-    with patch("pathlib.Path.exists", return_value=False):
-        result = cache.load_cache()
-        assert result == {}
-
-    # Test for existing file
-    mock_json_data = '{"test_key": "test_value"}'
-    with patch("pathlib.Path.exists", return_value=True):
-        with patch("builtins.open", mock_open(read_data=mock_json_data)):
-            result = cache.load_cache()
-            assert result == {"test_key": "test_value"}
-
-    # Test for JSON decode error
-    with patch("pathlib.Path.exists", return_value=True):
-        with patch("builtins.open", mock_open(read_data="invalid json")):
-            with patch("import_bank_details.classification.logger.warning") as mock_warning:
-                result = cache.load_cache()
-                assert result == {}
-                mock_warning.assert_called_once()
-
-
-def test_search_cache_save_cache(tmpdir):
-    """Test the save_cache method."""
-    cache = SearchCache()
-    test_data = {"test_key": "test_value"}
-
-    with patch("builtins.open", mock_open()) as mock_file:
-        cache.save_cache(test_data)
-        mock_file.assert_called_once()
-
-
-def test_search_cache_rate_limit():
-    """Test the rate_limit method."""
-    cache = SearchCache()
-    cache.min_request_interval = 0.1  # Set a small interval for testing
-
-    # First call should not sleep
-    start_time = time.time()
-    cache.rate_limit()
-    elapsed = time.time() - start_time
-    assert elapsed < 0.05  # Should be almost instant
-
-    # Second immediate call should sleep
-    with patch("time.sleep") as mock_sleep:
-        cache.rate_limit()
-        mock_sleep.assert_called_once()
-
-
-@patch("import_bank_details.classification.search_cache", new_callable=MagicMock)
-@patch("import_bank_details.classification.get_tavily_client")
-def test_perform_online_search_basic(mock_get_tavily_client, mock_search_cache):
-    """Test the perform_online_search function with basic functionality."""
-    # Set up mock for Tavily client
-    mock_tavily_client = MagicMock()
-    mock_get_tavily_client.return_value = mock_tavily_client
-
-    # Set up search results
-    mock_results = {"results": [{"title": "Test Result", "content": "Test Content"}]}
-    mock_tavily_client.search.return_value = mock_results
-
-    # Test with valid search term
-    mock_search_cache.load_cache.return_value = {}
-    result = perform_online_search("test query")
-
-    # Verify expected calls
-    assert mock_search_cache.load_cache.call_count == 2
-    mock_search_cache.save_cache.assert_called_once()
-    mock_tavily_client.search.assert_called_once_with(query="test query", search_depth="basic", max_results=2, country="germany")
-
-    # Check that results contain the expected content
-    assert "Test Result" in result
-    assert "Test Content" in result
-
-
-@patch("import_bank_details.classification.search_cache", new_callable=MagicMock)
-def test_perform_online_search_cached(mock_search_cache):
-    """Test the perform_online_search function with cached results."""
-    # Set up mock for SearchCache
-    mock_search_cache.load_cache.return_value = {"test query:2": "Cached result"}
-
-    result = perform_online_search("test query")
-
-    # Verify cache was checked but not saved (as we got a hit)
-    mock_search_cache.load_cache.assert_called_once()
-    mock_search_cache.save_cache.assert_not_called()
-
-    # Check result is from cache
-    assert result == "Cached result"
-
-
-@patch("import_bank_details.classification.search_cache", new_callable=MagicMock)
-@patch("import_bank_details.classification.get_tavily_client")
-def test_perform_online_search_empty_results(mock_get_tavily_client, mock_search_cache):
-    """Test the perform_online_search function with empty results."""
-    # Set up mock for Tavily with empty results
-    mock_tavily_client = MagicMock()
-    mock_get_tavily_client.return_value = mock_tavily_client
-    mock_tavily_client.search.return_value = {"results": []}
-
-    mock_search_cache.load_cache.return_value = {}
-    result = perform_online_search("test query")
-
-    # Verify expected calls
-    assert mock_search_cache.load_cache.call_count == 2
-    # Cache should be saved for empty results now
-    mock_search_cache.save_cache.assert_called_once()
-
-    # Check that result is the expected "not found" message
-    assert result == "No results found"
-
-
 @patch("time.sleep", return_value=None)
-@patch("import_bank_details.classification.search_cache", new_callable=MagicMock)
-@patch("import_bank_details.classification.get_tavily_client")
-def test_perform_online_search_retry_and_fail(mock_get_tavily_client, mock_search_cache, mock_sleep):
-    """Test the perform_online_search function with retry logic for failures."""
-    # Set up mock for Tavily to always raise an exception
-    mock_tavily_client = MagicMock()
-    mock_get_tavily_client.return_value = mock_tavily_client
-    mock_tavily_client.search.side_effect = Exception("API limit exceeded")
+def test_get_classification_retries(mock_sleep):
+    """Test that get_classification retries on transient failure then succeeds."""
+    mock_openai_client = MagicMock()
 
-    mock_search_cache.load_cache.return_value = {}
-    # Set max_retries to a specific value for the test
-    mock_search_cache.max_retries = 3
-    mock_search_cache.initial_delay = 0.1
+    expense_type = None
+    for et in ExpenseType:  # type: ignore[attr-defined]
+        if et.value == "Groceries, Auchan":
+            expense_type = et
+            break
 
-    result = perform_online_search("test query")
+    mock_output = ExpenseOutput(expense_type=expense_type)
 
-    # Verify it tried to load from cache
-    mock_search_cache.load_cache.assert_called_once()
-    # Verify it did not save the failure message to cache
-    mock_search_cache.save_cache.assert_not_called()
-    # Verify the number of search attempts
-    assert mock_tavily_client.search.call_count == 3
-    # Verify the number of sleeps
-    assert mock_sleep.call_count == 3
-    # Check for the final error message
-    assert result == "Online search failed after multiple attempts"
-
-
-@patch("time.sleep", return_value=None)
-@patch("import_bank_details.classification.search_cache", new_callable=MagicMock)
-@patch("import_bank_details.classification.get_tavily_client")
-def test_perform_online_search_retry_and_succeed(mock_get_tavily_client, mock_search_cache, mock_sleep):
-    """Test the perform_online_search function with retry logic that succeeds."""
-    # Set up mock for Tavily to fail twice, then succeed
-    mock_tavily_client = MagicMock()
-    mock_get_tavily_client.return_value = mock_tavily_client
-    mock_results = {"results": [{"title": "Test Result", "content": "Test Content"}]}
-    mock_tavily_client.search.side_effect = [
-        Exception("API limit exceeded"),
-        Exception("Search error"),
-        mock_results,
+    # First call fails, second succeeds
+    mock_openai_client.beta.chat.completions.parse.side_effect = [
+        Exception("Temporary error"),
+        MockParsedResponse(mock_output),
     ]
 
-    mock_search_cache.load_cache.return_value = {}
-    mock_search_cache.max_retries = 3
-    mock_search_cache.initial_delay = 0.1
+    expense_input = {"Day": "01/01/2023", "Expense_name": "Lidl", "Amount": "30.00", "Bank": "N26", "Comment": ""}
 
-    result = perform_online_search("test query")
+    result = get_classification(
+        expense_input=expense_input,
+        openai_client=mock_openai_client,
+        system_prompt="Test",
+        model_name="gpt-4o-mini",
+        temperature=0.0,
+    )
 
-    # Verify it tried to load from cache
-    assert mock_search_cache.load_cache.call_count == 2
-    # Verify it saved to cache on success
-    mock_search_cache.save_cache.assert_called_once()
-    # Verify the number of search attempts
-    assert mock_tavily_client.search.call_count == 3
-    # Verify the number of sleeps for the failed attempts
+    assert isinstance(result, ExpenseOutput)
+    assert result.category == "Groceries"
+    assert mock_openai_client.beta.chat.completions.parse.call_count == 2
+    mock_sleep.assert_called_once()
+
+
+@patch("time.sleep", return_value=None)
+def test_get_classification_retries_exhausted(mock_sleep):
+    """Test that get_classification raises after all retries are exhausted."""
+    mock_openai_client = MagicMock()
+    mock_openai_client.beta.chat.completions.parse.side_effect = Exception("Persistent error")
+
+    expense_input = {"Day": "01/01/2023", "Expense_name": "Lidl", "Amount": "30.00", "Bank": "N26", "Comment": ""}
+
+    with pytest.raises(Exception, match="Persistent error"):
+        get_classification(
+            expense_input=expense_input,
+            openai_client=mock_openai_client,
+            system_prompt="Test",
+            model_name="gpt-4o-mini",
+            temperature=0.0,
+        )
+
+    assert mock_openai_client.beta.chat.completions.parse.call_count == 3
     assert mock_sleep.call_count == 2
-    # Check that results contain the expected content
-    assert "Test Result" in result
-    assert "Test Content" in result
-
-
-def test_get_openai_client_raises_error_if_key_is_missing(monkeypatch):
-    """Test that get_openai_client raises a ValueError if the API key is not set."""
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(ValueError, match="OPENAI_API_KEY environment variable is not set"):
-        get_openai_client()
-
-
-def test_get_tavily_client_raises_error_if_key_is_missing(monkeypatch):
-    """Test that get_tavily_client raises a ValueError if the API key is not set."""
-    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
-    with pytest.raises(ValueError, match="TAVILY_API_KEY environment variable is not set"):
-        get_tavily_client()
-
-
-def test_get_openai_client_returns_client(monkeypatch):
-    """Test that get_openai_client returns an OpenAI client instance."""
-    monkeypatch.setenv("OPENAI_API_KEY", "test_key")
-    client = get_openai_client()
-    assert isinstance(client, OpenAI)
-    client2 = get_openai_client()
-    assert client is client2
-
-
-def test_get_tavily_client_returns_client(monkeypatch):
-    """Test that get_tavily_client returns a TavilyClient instance."""
-    monkeypatch.setenv("TAVILY_API_KEY", "test_key")
-    client = get_tavily_client()
-    assert isinstance(client, TavilyClient)
-    client2 = get_tavily_client()
-    assert client is client2

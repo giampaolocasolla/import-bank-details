@@ -1,101 +1,42 @@
 import logging
 from enum import Enum
-from typing import Optional
+from pathlib import Path
+from typing import Any, Dict, Optional
 
+import yaml
 from pydantic import BaseModel, field_validator
 
-# Get the logger instance
 logger = logging.getLogger(__name__)
 
-# Your list of categories and subcategories
-data = """
-Housing\tRent
-Housing\tCondoFee
-Housing\tCondoAssurance
-Housing\tInternet
-Housing\tFurniture
-Housing\tMove
-Housing\tCleaning
-Housing\tHousingTaxes
-Housing\tTV
-Housing\tElectricity
-Housing\tPhone
-Transport\tFuel
-Transport\tParking
-Transport\tRevision
-Transport\tTaxi
-Transport\tRepair
-Transport\tTyres
-Transport\tCarTaxes
-Transport\tCarAssurance
-Transport\tBike
-Transport\tTolls
-Transport\tPublicTransport
-Groceries\tAuchan
-Groceries\tDelhaize
-Groceries\tLidl
-Groceries\tAldi
-Groceries\tRewe
-Groceries\tKaufland
-Groceries\tAmazon
-Groceries\tIkeaGroceries
-Groceries\tBarber
-Groceries\tOtherGroceries
-Travel\tNaples
-Travel\tSmallTrip
-Travel\tLongTrip
-Out\tRestaurants
-Out\tBar
-Out\tTakeAway
-Out\tFoodDelivery
-Out\tTip
-Out\tLeisure
-Leisure\tBooks
-Leisure\tLeisure
-Leisure\tLearning
-Leisure\tGames
-Leisure\tTech
-Leisure\tOtherLeisure
-Health\tInsurance
-Health\tDoctors
-Health\tGlasses
-Health\tMedicines
-Health\tSport
-Health\tSafety
-Health\tExams
-Gifts\tBirthdays
-Gifts\tChristmas
-Gifts\tWeddings
-Gifts\tDonations
-Gifts\tFamily
-Gifts\tOtherGifts
-Clothing\tMrClothing
-Clothing\tOtherClothing
-Fees\tBrokers
-Fees\tConsulting
-Fees\tPostal
-Fees\tBanks
-Fees\tFines
-Fees\tAssurance
-Fees\tTax
-Fees\tOtherFees
-OtherExpenses\tOtherExpenses
-"""
+_DEFAULT_CATEGORIES_PATH = Path(__file__).parent / "categories.yaml"
 
-# Process the data to create enum members
-lines = data.strip().split("\n")
-enum_members = {}
 
-for line in lines:
-    category, subcategory = line.strip().split("\t")
-    enum_member_name = subcategory.upper().replace(" ", "_")
-    # Avoid name clashes
-    if enum_member_name in enum_members:
-        enum_member_name = f"{category.upper()}_{enum_member_name}"
-    enum_members[enum_member_name] = f"{category}, {subcategory}"
+def load_expense_type_enum(categories_path: Optional[Path] = None) -> type:
+    """Load expense categories from YAML and create the ExpenseType enum.
 
-# Create the ExpenseType enum
-ExpenseType = Enum("ExpenseType", enum_members)  # type: ignore
+    Args:
+        categories_path: Path to the categories YAML file.
+            Defaults to the co-located categories.yaml.
+
+    Returns:
+        A dynamically created Enum class.
+    """
+    path = categories_path or _DEFAULT_CATEGORIES_PATH
+    with open(path, "r", encoding="utf-8") as f:
+        categories: Dict[str, Any] = yaml.safe_load(f)
+
+    enum_members: Dict[str, str] = {}
+    for category, subcategories in categories.items():
+        for subcategory in subcategories:
+            enum_member_name = subcategory.upper().replace(" ", "_")
+            if enum_member_name in enum_members:
+                enum_member_name = f"{category.upper()}_{enum_member_name}"
+            enum_members[enum_member_name] = f"{category}, {subcategory}"
+
+    return Enum("ExpenseType", enum_members)  # type: ignore
+
+
+ExpenseType = load_expense_type_enum()
 
 
 class ExpenseOutput(BaseModel):
@@ -104,15 +45,16 @@ class ExpenseOutput(BaseModel):
     expense_type: ExpenseType  # type: ignore
 
     @property
-    def category(self):
-        return self.expense_type.value.split(", ")[0]
+    def category(self) -> str:
+        return self.expense_type.value.split(", ")[0]  # type: ignore[attr-defined, no-any-return]
 
     @property
-    def subcategory(self):
-        return self.expense_type.value.split(", ")[1]
+    def subcategory(self) -> str:
+        return self.expense_type.value.split(", ")[1]  # type: ignore[attr-defined, no-any-return]
 
     @field_validator("expense_type")
-    def validate_expense_type(cls, v):
+    @classmethod
+    def validate_expense_type(cls, v: Any) -> Any:
         if not isinstance(v, ExpenseType):
             raise ValueError("Invalid expense type")
         return v
