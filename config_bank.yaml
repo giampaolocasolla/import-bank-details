@@ -81,4 +81,7 @@ revolut_it:
   Remove:
     - Accredita EUR
     - Pagamento da GIAMPAOLO CASOLLA
+    - Prelievo da Pocket
+    - Conversione in EUR
+    - To Giampaolo Casolla
   Day: "%Y-%m-%d %H:%M:%S"
