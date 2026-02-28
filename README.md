@@ -3,143 +3,61 @@
 [![CI](https://github.com/giampaolocasolla/import-bank-details/actions/workflows/ci.yml/badge.svg)](https://github.com/giampaolocasolla/import-bank-details/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/giampaolocasolla/import-bank-details/branch/main/graph/badge.svg)](https://codecov.io/gh/giampaolocasolla/import-bank-details)
 
-This project is designed to import, process, and classify bank details from various sources. It reads data from CSV or Excel files, processes the data according to specified configurations, classifies expenses using OpenAI's language model (with optional online search augmentation), and outputs the processed data to an Excel file.
+Import, process, and classify bank statements from multiple sources. Reads CSV/Excel exports from various banks, classifies expenses using OpenAI with optional Tavily search enrichment, and outputs a consolidated Excel file.
 
 ## Features
 
-- **Import Data from Multiple Banks**: Supports Curve, ING, N26, Revolut, and more.
-- **Data Cleaning and Processing**: Cleans and processes data based on configurable settings.
-- **Parallel Expense Classification**:
-  - Classifies expenses in parallel to significantly speed up processing time.
-  - The number of parallel workers can be configured in `import_bank_details/main.py`.
-- **Primary Classification**: Uses OpenAI's GPT model to categorize expenses.
-- **Enhanced Classification**: Optionally integrates online search results to improve classification accuracy.
-- **Online Search Integration**: Fetches additional information from Tavily to augment expense classification.
-- **Output to Excel**: Exports the processed and classified data to an Excel file for easy review and analysis.
+- **Multi-bank support** — Curve, ING, N26, Revolut (configuration-driven, easy to extend)
+- **Parallel AI classification** — Expenses classified concurrently via OpenAI Responses API with Pydantic structured output
+- **Search-augmented classification** — Optional Tavily search enrichment for improved accuracy on ambiguous expenses
+- **Few-shot learning** — Example-based prompting from historical classifications
+- **Configurable** — Bank mappings, categories, LLM settings all defined in YAML
 
 ## Requirements
 
-- **Python 3.11** or higher
-- **uv** for dependency management
-- **OpenAI API Key**
-- **Tavily API Key**
+- Python 3.11+
+- [uv](https://github.com/astral-sh/uv) for dependency management
+- OpenAI API key
+- Tavily API key
 
 ## Installation
 
-1. **Clone the Repository**:
+```sh
+git clone https://github.com/giampaolocasolla/import-bank-details.git
+cd import-bank-details
+uv sync
+```
 
-    ```sh
-    git clone https://github.com/giampaolocasolla/import-bank-details.git
-    cd import-bank-details
-    ```
+Create a `.env` file in the project root:
 
-2. **Install uv (if not already installed)**:
-
-    ```sh
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    ```
-
-3. **Install Dependencies Using uv**:
-
-    ```sh
-    uv sync
-    ```
-
-4. **Set Up Your API Keys**:
-    - Create a `.env` file in the project root.
-    - Add your OpenAI and Tavily API keys:
-
-      ```
-      OPENAI_API_KEY="your_openai_api_key"
-      TAVILY_API_KEY="your_tavily_api_key"
-      ```
+```
+OPENAI_API_KEY="your_openai_api_key"
+TAVILY_API_KEY="your_tavily_api_key"
+```
 
 ## Usage
-
-Run the main script to process and classify the bank details:
 
 ```sh
 uv run python -m import_bank_details.main
 ```
 
-### Classification with Online Search
-
-The application can perform online searches to gather additional context for classifying expenses. This feature is powered by Tavily and can be enabled by setting `include_online_search=True` when calling `classify_expenses`.
-The search results are cached to improve performance and reduce redundant searches.
-The cache is stored in `data/examples/search_cache.json`.
-
-Example:
-
-```python
-classification = get_classification(
-    expense_input=expense_data,
-    include_online_search=True
-)
-```
+Place bank export files in `data/{bank_name}/` and the pipeline will automatically pick up the most recent file from each subfolder.
 
 ## Testing
 
-Run the test suite using the provided test script:
-
 ```sh
-./run_tests.sh
+./run_tests.sh              # All tests
+./run_tests.sh --unit       # Unit tests only
+./run_tests.sh --integration # Integration tests only
 ```
 
-The script offers several options:
+## Documentation
 
-- `--help`: Show usage information
-- `--verbose`, `-v`: Run tests in verbose mode
-- `--all`: Run all tests (default)
-- `--unit`: Run only unit tests
-- `--integration`: Run only integration tests
-- `--extra PATTERN`: Run tests matching the given pattern
+See [`docs/`](docs/) for detailed documentation:
 
-The test output is color-coded:
-- Green: Successful test results
-- Red: Failed tests or errors
-- Yellow: Informational messages
-
-Example usage:
-```sh
-# Run all tests
-./run_tests.sh
-
-# Run only unit tests in verbose mode
-./run_tests.sh --unit -v
-
-# Run tests matching a specific pattern
-./run_tests.sh --extra "test_import"
-```
-
-## CI/CD Pipeline
-
-This project uses GitHub Actions for Continuous Integration and Continuous Deployment:
-
-- **Automated Tests**: All tests are automatically run on each push and pull request.
-- **Code Quality Checks**:
-  - Code formatting with Black
-  - Linting with Flake8
-  - Import sorting with isort
-  - Type checking with mypy
-  - Pre-commit hook verification
-- **Test Coverage**: Coverage reports are generated and uploaded to Codecov.
-
-You can see the status of these checks on any pull request or in the Actions tab of the GitHub repository.
-
-## Configuration
-
-- **`config_bank.yaml`**: Specifies the import settings and column mappings for different banks.
-- **`config_llm.yaml`**: Contains configuration for the OpenAI language model used for expense classification.
-
-Ensure that these files are correctly set up before running the script.
-
-## Expense Classification
-
-The project uses OpenAI's GPT model to classify expenses into primary and secondary categories. The classification is based on the expense name, amount, and other details. With the optional online search functionality, the classification process can be augmented with additional context fetched from Tavily, enhancing accuracy for ambiguous or less common expense names.
-
-### Classification Examples
-
-The `data/examples` directory contains a CSV file with example classifications. This file is used to provide few-shot examples to the language model, which improves the accuracy of the classification.
+- [Architecture](docs/ARCHITECTURE.md) — Tech stack, system overview, data flow, design decisions
+- [Abstractions](docs/ABSTRACTIONS.md) — Domain models, configuration formats, classification pipeline
+- [Getting Started](docs/GETTING_STARTED.md) — Directory structure, how to extend, testing, CI/CD
 
 ## License
 
