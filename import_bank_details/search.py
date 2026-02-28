@@ -124,15 +124,25 @@ def perform_online_search(
                 country="germany",
             )
 
+            # Fallback: retry without country filter if no results
+            if not search_results or not search_results.get("results"):
+                logger.debug(f"No results with country filter, retrying without for: {cleaned_name}")
+                search_cache.rate_limit()
+                search_results = tavily_client.search(
+                    query=cleaned_name,
+                    search_depth="basic",
+                    max_results=max_results,
+                )
+
             search_result_str: str
             if search_results and search_results.get("results"):
                 search_result_str = json.dumps(search_results["results"], ensure_ascii=False)
                 logger.debug(f"Found {len(search_results['results'])} results for: {cleaned_name}")
+                search_cache.put(cache_key, search_result_str, cache_path)
             else:
                 search_result_str = "No results found"
                 logger.warning(f"No results found for '{cleaned_name}'")
 
-            search_cache.put(cache_key, search_result_str, cache_path)
             return search_result_str
 
         except Exception as e:

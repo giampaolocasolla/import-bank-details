@@ -112,7 +112,7 @@ class TestPerformOnlineSearch:
     """Tests for perform_online_search function."""
 
     def test_basic_search(self):
-        """Test basic search functionality."""
+        """Test basic search with country filter on first call."""
         mock_tavily = MagicMock()
         mock_results = {"results": [{"title": "Test Result", "content": "Test Content"}]}
         mock_tavily.search.return_value = mock_results
@@ -139,8 +139,8 @@ class TestPerformOnlineSearch:
         mock_tavily.search.assert_not_called()
         assert result == "Cached result"
 
-    def test_empty_results(self):
-        """Test search with empty results."""
+    def test_empty_results_not_cached(self):
+        """Test search with empty results is not cached."""
         mock_tavily = MagicMock()
         mock_tavily.search.return_value = {"results": []}
 
@@ -149,6 +149,44 @@ class TestPerformOnlineSearch:
 
         result = perform_online_search("test query", mock_tavily, cache)
         assert result == "No results found"
+        # "No results found" must NOT be cached
+        assert cache.get("test query:2") is None
+
+    def test_fallback_without_country(self):
+        """Test fallback search without country filter when first call returns empty."""
+        mock_tavily = MagicMock()
+        empty_results: dict[str, list[dict[str, str]]] = {"results": []}
+        success_results = {"results": [{"title": "Found It", "content": "International"}]}
+        mock_tavily.search.side_effect = [empty_results, success_results]
+
+        cache = SearchCache()
+        cache._loaded = True
+
+        result = perform_online_search("RICEPAELLA", mock_tavily, cache)
+
+        assert mock_tavily.search.call_count == 2
+        # First call with country filter
+        mock_tavily.search.assert_any_call(query="RICEPAELLA", search_depth="basic", max_results=2, country="germany")
+        # Second call without country filter
+        mock_tavily.search.assert_any_call(query="RICEPAELLA", search_depth="basic", max_results=2)
+        assert "Found It" in result
+        # Successful result should be cached
+        assert cache.get("RICEPAELLA:2") is not None
+
+    def test_fallback_both_empty(self):
+        """Test that both calls returning empty gives 'No results found' and is NOT cached."""
+        mock_tavily = MagicMock()
+        mock_tavily.search.return_value = {"results": []}
+
+        cache = SearchCache()
+        cache._loaded = True
+
+        result = perform_online_search("Contipark 09033051601", mock_tavily, cache)
+
+        assert mock_tavily.search.call_count == 2
+        assert result == "No results found"
+        # Must NOT be cached
+        assert cache.get("Contipark 09033051601:2") is None
 
     def test_invalid_search_term(self):
         """Test search with term that becomes empty after cleaning."""
