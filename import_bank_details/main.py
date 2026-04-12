@@ -29,7 +29,7 @@ def get_latest_files(data_dir: str, base_dir: Optional[str] = None) -> Dict[str,
         Dictionary with folder names as keys and latest file paths as values.
     """
     cwd = base_dir or os.getcwd()
-    folders_data = os.listdir(data_dir)
+    folders_data = [folder for folder in os.listdir(data_dir) if not folder.startswith(".")]
     file_data: Dict[str, str] = {}
     for folder in folders_data:
         folder_path = os.path.join(cwd, data_dir, folder)
@@ -231,7 +231,10 @@ def validate_example_structure(df: pd.DataFrame, df_examples: pd.DataFrame) -> N
     dtype_mismatch = {}
     for col in df.columns:
         if df[col].dtype != df_examples[col].dtype:
-            dtype_mismatch[col] = {"data_dtype": df[col].dtype, "example_dtype": df_examples[col].dtype}
+            dtype_mismatch[col] = {
+                "data_dtype": df[col].dtype,
+                "example_dtype": df_examples[col].dtype,
+            }
 
     if dtype_mismatch:
         mismatch_details = ", ".join(

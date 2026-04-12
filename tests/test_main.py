@@ -34,6 +34,22 @@ def test_get_latest_files(sample_data_dir, sample_n26_csv, sample_revolut_csv, s
     assert os.path.basename(file_data["examples"]) == "examples_test.csv"
 
 
+def test_get_latest_files_ignores_hidden_entries(sample_data_dir, sample_n26_csv, sample_revolut_csv, sample_example_csv, caplog):
+    """Hidden files in the data directory should be ignored entirely."""
+    hidden_file = os.path.join(sample_data_dir, ".DS_Store")
+    with open(hidden_file, "w") as file_handle:
+        file_handle.write("macOS metadata")
+
+    with caplog.at_level("WARNING"):
+        file_data = get_latest_files(
+            data_dir=sample_data_dir,
+            base_dir=os.path.dirname(sample_data_dir),
+        )
+
+    assert ".DS_Store" not in file_data
+    assert "No files found in folder: .DS_Store" not in caplog.text
+
+
 def test_get_latest_files_empty_folder(sample_data_dir):
     """Test the get_latest_files function with an empty folder."""
     empty_data_dir = os.path.join(sample_data_dir, "empty_data")
@@ -160,7 +176,15 @@ def test_process_examples():
 def test_remove_unnecessary_expenses():
     """Test the remove_unnecessary_expenses function."""
     # Create a dataframe
-    data = {"Expense_name": ["Supermarket", "Restaurant", "Payment from User", "To EUR", None]}
+    data = {
+        "Expense_name": [
+            "Supermarket",
+            "Restaurant",
+            "Payment from User",
+            "To EUR",
+            None,
+        ]
+    }
     df = pd.DataFrame(data)
 
     # Define removal criteria
@@ -379,12 +403,17 @@ def test_main_all_banks_fail(sample_data_dir, sample_config):
         mock.patch("import_bank_details.main.SearchCache"),
         mock.patch("import_bank_details.main.import_data") as mock_import_data,
     ):
-
         mock_load_config.side_effect = [
             sample_config,
-            {"llm": {"model_name": "gpt-4o-mini", "temperature_base": 0.0}, "system_prompt": "Test"},
+            {
+                "llm": {"model_name": "gpt-4o-mini", "temperature_base": 0.0},
+                "system_prompt": "Test",
+            },
         ]
-        mock_get_latest_files.return_value = {"n26": "/fake/n26.csv", "revolut": "/fake/revolut.csv"}
+        mock_get_latest_files.return_value = {
+            "n26": "/fake/n26.csv",
+            "revolut": "/fake/revolut.csv",
+        }
         mock_import_data.side_effect = Exception("File not found")
 
         with pytest.raises(RuntimeError, match="All banks failed to process"):
@@ -404,10 +433,12 @@ def test_main_partial_bank_failure(sample_data_dir, sample_n26_csv, sample_confi
         mock.patch("import_bank_details.main.classify_expenses") as mock_classify,
         mock.patch("import_bank_details.main.save_to_excel") as mock_save,
     ):
-
         mock_load_config.side_effect = [
             sample_config,
-            {"llm": {"model_name": "gpt-4o-mini", "temperature_base": 0.0}, "system_prompt": "Test"},
+            {
+                "llm": {"model_name": "gpt-4o-mini", "temperature_base": 0.0},
+                "system_prompt": "Test",
+            },
         ]
         mock_get_latest_files.return_value = {
             "n26": sample_n26_csv,
@@ -434,7 +465,12 @@ def test_main_partial_bank_failure(sample_data_dir, sample_n26_csv, sample_confi
 
 
 def test_main_happy_path(
-    sample_data_dir, sample_n26_csv, sample_revolut_csv, sample_example_csv, sample_config, sample_llm_config
+    sample_data_dir,
+    sample_n26_csv,
+    sample_revolut_csv,
+    sample_example_csv,
+    sample_config,
+    sample_llm_config,
 ):
     """Test main function happy path with all components mocked."""
     from import_bank_details.structured_output import ExpenseOutput, ExpenseType
@@ -457,7 +493,6 @@ def test_main_happy_path(
         mock.patch("import_bank_details.classification.get_classification") as mock_classify,
         mock.patch("import_bank_details.main.save_to_excel") as mock_save,
     ):
-
         mock_load_config.side_effect = [sample_config, sample_llm_config]
         mock_get_latest_files.return_value = {
             "n26": sample_n26_csv,
@@ -477,7 +512,12 @@ def test_main_happy_path(
 
 
 def test_main_output_sort_order(
-    sample_data_dir, sample_n26_csv, sample_revolut_csv, sample_example_csv, sample_config, sample_llm_config
+    sample_data_dir,
+    sample_n26_csv,
+    sample_revolut_csv,
+    sample_example_csv,
+    sample_config,
+    sample_llm_config,
 ):
     """Test that the output DataFrame is sorted by Day, Amount, Expense_name."""
     import threading
@@ -512,7 +552,6 @@ def test_main_output_sort_order(
         mock.patch("import_bank_details.classification.get_classification") as mock_classify,
         mock.patch("import_bank_details.main.save_to_excel") as mock_save,
     ):
-
         mock_load_config.side_effect = [sample_config, sample_llm_config]
         mock_get_latest_files.return_value = {
             "n26": sample_n26_csv,
