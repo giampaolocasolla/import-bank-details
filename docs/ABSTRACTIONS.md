@@ -71,6 +71,18 @@ expense_type: ExpenseType   # The dynamically generated enum
 
 Validation via `@field_validator` ensures only valid `ExpenseType` members are accepted.
 
+### ExpenseBatchItem / ExpenseOutputBatch
+```
+ExpenseBatchItem
+├── id: str                 # Stable id within the batch (coerced to string)
+└── expense_type: ExpenseType
+
+ExpenseOutputBatch
+└── items: list[ExpenseBatchItem]
+```
+
+Used for batched LLM classification. Missing or invalid ids fall back to a single `ExpenseOutput` request.
+
 ### ExpenseEntry
 ```
 input: ExpenseInput
@@ -84,13 +96,15 @@ output: Optional[ExpenseOutput]   # None before classification
 
 1. **Build few-shot examples** — Convert `data/examples/*.csv` rows into `ExpenseEntry` objects with known outputs, then serialize as `{"input": {...}, "output": "Primary, Secondary"}` pairs.
 
-2. **Optional search enrichment** — If `include_online_search=True`, call `perform_online_search()` which queries Tavily for the expense name (with a Germany country filter, falling back without), caches results, and appends them to the user message.
+2. **Skip negatives and apply cache** — Negative amounts (income/refunds) skip classification. Remaining merchants are looked up in `ClassificationCache` (keyed by cleaned expense name). Hits reuse stored Primary/Secondary values and skip the LLM.
 
-3. **LLM call** — Send system prompt (from `config_llm.yaml`) + optional category list + few-shot messages + user message to `openai.responses.parse()`. The response is constrained to the `ExpenseOutput` Pydantic schema.
+3. **Optional search enrichment** — If `include_online_search=True`, call `perform_online_search()` which queries Tavily for the expense name (with a Germany country filter, falling back without), caches results, and attaches them per expense in the batch user message.
 
-4. **Validation** — Pydantic validates that the returned `expense_type` is a valid `ExpenseType` enum member.
+4. **Batched LLM call** — Remaining expenses are sent in chunks of `batch_size` (default 10). Each batch is one structured call: system prompt (from `config_llm.yaml`) + optional category list + few-shot messages + all items. `provider` selects the API: local Ollama uses Chat Completions with `reasoning_effort: "none"`; cloud OpenAI uses `openai.responses.parse()`. The response is constrained to `ExpenseOutputBatch`. `max_workers` parallelizes batches, not rows.
 
-Negative amounts (income/refunds) skip classification entirely.
+5. **Validation and fallback** — Pydantic validates each returned `expense_type`. If an id is missing or the batch call fails, that expense is retried via `get_classification` (`ExpenseOutput`). If that also fails, Primary/Secondary stay None.
+
+Successful LLM classifications are written to `ClassificationCache`. Negative skips, failures, and empty categories are not cached.
 
 ## LLM Configuration
 
@@ -98,15 +112,32 @@ Defined in `config_llm.yaml`:
 
 ```yaml
 llm:
-  model_name: "gpt-5-mini"
+  provider: ollama
+  model_name: "qwen3.5:9b-q8_0"
+  base_url: "http://127.0.0.1:11434/v1"
+  api_key: "ollama"
   timeout: 180
+  temperature_base: 0
+  reasoning_effort: "none"
+  max_workers: 2
+  batch_size: 10
 
 system_prompt: "You are an helpful assistant that classifies expenses into categories and subcategories."
 ```
 
+Set `provider: openai` and `model_name` to a cloud model to use `OPENAI_API_KEY` instead. `reasoning_effort: "none"` is required for fast Qwen classification; quote it in YAML so it is not parsed as null. If Ollama is not running, the pipeline exports blank `Primary`/`Secondary` columns instead of hanging.
+
 The system prompt is augmented at runtime with the full nested category list when `include_categories_in_prompt=True`.
 
 ## Search and Caching
+
+### ClassificationCache class (`classification_cache.py`)
+
+- **Thread-safe**: All access goes through a `threading.Lock`
+- **Keyed by cleaned merchant name** via `clean_expense_name` (same prefix stripping as search)
+- **Disk-persistent**: Written to `data/examples/classification_cache.json` after every new entry
+- **Created whenever classification runs**, including when Tavily is disabled
+- Empty names and empty Primary/Secondary values are not stored
 
 ### SearchCache class (`search.py`)
 

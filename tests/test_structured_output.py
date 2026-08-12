@@ -3,7 +3,15 @@
 import pytest
 from pydantic import ValidationError
 
-from import_bank_details.structured_output import ExpenseEntry, ExpenseInput, ExpenseOutput, ExpenseType, load_expense_type_enum
+from import_bank_details.structured_output import (
+    ExpenseBatchItem,
+    ExpenseEntry,
+    ExpenseInput,
+    ExpenseOutput,
+    ExpenseOutputBatch,
+    ExpenseType,
+    load_expense_type_enum,
+)
 
 
 def test_expense_type_enum():
@@ -91,3 +99,17 @@ def test_expense_entry_model():
     expense_entry_no_output = ExpenseEntry(input=expense_input)
     assert expense_entry_no_output.input == expense_input
     assert expense_entry_no_output.output is None
+
+
+def test_expense_batch_item_and_output_batch():
+    """Batch models should coerce ids to strings and validate expense types."""
+    item = ExpenseBatchItem(id=0, expense_type=ExpenseType.RESTAURANTS)  # type: ignore[attr-defined]
+    assert item.id == "0"
+    assert item.expense_type == ExpenseType.RESTAURANTS  # type: ignore[attr-defined]
+
+    batch = ExpenseOutputBatch(items=[item])
+    assert len(batch.items) == 1
+    assert batch.items[0].id == "0"
+
+    with pytest.raises(ValidationError):
+        ExpenseBatchItem(id="1", expense_type="Not an enum")

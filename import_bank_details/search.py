@@ -7,6 +7,8 @@ from typing import Dict, Optional
 
 from tavily import TavilyClient
 
+from import_bank_details.expense_names import clean_expense_name
+
 logger = logging.getLogger(__name__)
 
 
@@ -91,12 +93,7 @@ def perform_online_search(
     """
     logger.debug(f"Starting search for expense: '{expense_name}'")
 
-    # Clean input
-    texts_to_remove = ["SumUp  *", "PAYPAL *", "LSP*", "CRV*", "PAY.nl*", "UZR*", "luca "]
-    cleaned_name = expense_name
-    for text in texts_to_remove:
-        cleaned_name = cleaned_name.replace(text, "")
-    cleaned_name = cleaned_name.strip()
+    cleaned_name = clean_expense_name(expense_name)
 
     if not cleaned_name:
         logger.warning(f"Invalid search term after cleaning: {expense_name}")

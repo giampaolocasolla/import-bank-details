@@ -56,6 +56,7 @@ def test_main_integration(
     mock_save_to_excel.return_value = None
 
     with (
+        mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key", "TAVILY_API_KEY": "test-tavily-key"}),
         mock.patch("import_bank_details.main.load_config") as mock_load_config,
         mock.patch("import_bank_details.main.setup_logging"),
         mock.patch("import_bank_details.main.get_latest_files") as mock_get_latest_files,
@@ -103,6 +104,7 @@ def test_main_missing_example(
     mock_save_to_excel.return_value = None
 
     with (
+        mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key", "TAVILY_API_KEY": "test-tavily-key"}),
         mock.patch("import_bank_details.main.load_config") as mock_load_config,
         mock.patch("import_bank_details.main.setup_logging"),
         mock.patch("import_bank_details.main.get_latest_files") as mock_get_latest_files,
