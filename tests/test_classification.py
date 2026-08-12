@@ -15,13 +15,7 @@ from import_bank_details.classification import (
     get_list_expenses,
 )
 from import_bank_details.classification_cache import ClassificationCache
-from import_bank_details.structured_output import (
-    ExpenseBatchItem,
-    ExpenseEntry,
-    ExpenseOutput,
-    ExpenseOutputBatch,
-    ExpenseType,
-)
+from import_bank_details.structured_output import ExpenseBatchItem, ExpenseEntry, ExpenseOutput, ExpenseOutputBatch, ExpenseType
 
 
 def _timeout_error() -> APITimeoutError:

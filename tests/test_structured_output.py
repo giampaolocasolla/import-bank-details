@@ -103,7 +103,7 @@ def test_expense_entry_model():
 
 def test_expense_batch_item_and_output_batch():
     """Batch models should coerce ids to strings and validate expense types."""
-    item = ExpenseBatchItem(id=0, expense_type=ExpenseType.RESTAURANTS)  # type: ignore[attr-defined]
+    item = ExpenseBatchItem.model_validate({"id": 0, "expense_type": ExpenseType.RESTAURANTS})  # type: ignore[attr-defined]
     assert item.id == "0"
     assert item.expense_type == ExpenseType.RESTAURANTS  # type: ignore[attr-defined]
 

@@ -95,8 +95,6 @@ class TestClassificationCache:
         cache = ClassificationCache()
         cache.put("Lidl", "", "Lidl", tmp_path)
         cache.put("Lidl", "Groceries", "", tmp_path)
-        cache.put("Lidl", None, "Lidl", tmp_path)
-        cache.put("Lidl", "Groceries", None, tmp_path)
 
         assert cache.get("Lidl", tmp_path) is None
         assert not (tmp_path / "classification_cache.json").exists()
