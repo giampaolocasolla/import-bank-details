@@ -30,13 +30,13 @@ import-bank-details/
 | File | Role |
 |---|---|
 | `main.py` | Entry point; scans `data/`, imports, processes, classifies, exports |
-| `classification.py` | Builds few-shot messages, calls OpenAI in parallel, returns classified DataFrame |
+| `classification.py` | Builds few-shot messages, calls the configured LLM in parallel, returns classified DataFrame |
 | `search.py` | `SearchCache` class and `perform_online_search()` for Tavily lookups |
 | `structured_output.py` | `ExpenseInput`, `ExpenseOutput`, `ExpenseEntry` models; dynamic `ExpenseType` enum |
 | `utils.py` | `load_config()` — generic YAML loader |
 | `logger_setup.py` | File + stream logging with timestamped log files in `.log/` |
 | `config_bank.yaml` | Per-bank column mappings, date formats, import params, row filters |
-| `config_llm.yaml` | Model name, timeout, system prompt |
+| `config_llm.yaml` | Provider, model, Ollama endpoint, reasoning effort, timeout, system prompt |
 | `categories.yaml` | Hierarchical expense categories |
 
 ## How to Add a New Bank
@@ -88,10 +88,12 @@ If the bank has multiple export formats (like Revolut EN/IT), add a variant conf
 ## How to Modify Classification
 
 - **System prompt** — Edit `config_llm.yaml` → `system_prompt`.
-- **Model** — Change `config_llm.yaml` → `llm.model_name`.
+- **Model / provider** — Change `config_llm.yaml` → `llm.provider` (`ollama` or `openai`) and `llm.model_name`.
 - **Few-shot examples** — Add/edit rows in `data/examples/*.csv` (columns: Day, Expense_name, Amount, Bank, Comment, Primary, Secondary).
-- **Online search** — Toggle `include_online_search` in `main.py:main()`. Adjust `max_results` in `search.py:perform_online_search()`.
-- **Parallel workers** — Change `max_workers` in `classify_expenses()` call (default 10).
+- **Manual classification** — Run with `--skip-classification`, set `llm.provider: openai` without `OPENAI_API_KEY`, or run with local Ollama when the Ollama app is not running (the pipeline exports blank columns instead of hanging).
+- **Online search** — Set `TAVILY_API_KEY` to enable search enrichment. Adjust `max_results` in `search.py:perform_online_search()`.
+- **Parallel workers** — Change `max_workers` in `config_llm.yaml` → `llm` (default 2 for local Ollama). Workers parallelize classification batches.
+- **Batch size** — Change `batch_size` in `config_llm.yaml` → `llm` (default 10 expenses per LLM call).
 - **Temperature** — Set `temperature_base` in `config_llm.yaml` → `llm`.
 
 ## Testing
@@ -111,7 +113,7 @@ Run the test suite:
 | Marker | Meaning |
 |---|---|
 | *(default)* | Unit tests — no markers needed |
-| `@pytest.mark.integration` | Integration tests (require API keys) |
+| `@pytest.mark.integration` | Integration tests (API calls are mocked) |
 | `@pytest.mark.e2e` | End-to-end tests |
 
 ### Coverage

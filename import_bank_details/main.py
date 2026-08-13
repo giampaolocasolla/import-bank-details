@@ -1,7 +1,8 @@
+import argparse
 import glob
 import logging
 import os
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -9,12 +10,90 @@ from openai import OpenAI
 from tavily import TavilyClient
 
 from import_bank_details.classification import classify_expenses
+from import_bank_details.classification_cache import ClassificationCache
 from import_bank_details.logger_setup import setup_logging
 from import_bank_details.search import SearchCache
 from import_bank_details.utils import load_config
 
 # Get the logger for this module
 logger = logging.getLogger(__name__)
+
+
+DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1"
+DEFAULT_OLLAMA_API_KEY = "ollama"
+OLLAMA_HEALTH_CHECK_TIMEOUT = 5
+
+
+def create_llm_client(llm_settings: Dict[str, Any]) -> OpenAI:
+    """Create an OpenAI-compatible client for the configured provider."""
+    provider = llm_settings.get("provider", "ollama")
+    timeout = llm_settings.get("timeout", 180)
+    if provider == "ollama":
+        return OpenAI(
+            base_url=llm_settings.get("base_url", DEFAULT_OLLAMA_BASE_URL),
+            api_key=llm_settings.get("api_key", DEFAULT_OLLAMA_API_KEY),
+            timeout=timeout,
+        )
+    return OpenAI(timeout=timeout)
+
+
+def ollama_is_available(llm_settings: Dict[str, Any]) -> bool:
+    """Return True if the local Ollama server responds to a short models.list() probe."""
+    try:
+        client = OpenAI(
+            base_url=llm_settings.get("base_url", DEFAULT_OLLAMA_BASE_URL),
+            api_key=llm_settings.get("api_key", DEFAULT_OLLAMA_API_KEY),
+            timeout=OLLAMA_HEALTH_CHECK_TIMEOUT,
+        )
+        listed = client.models.list()
+    except Exception as exc:
+        logger.debug("Ollama health check failed: %s", exc)
+        return False
+
+    model_name = llm_settings.get("model_name")
+    if isinstance(model_name, str) and model_name:
+        available_ids = {getattr(model, "id", "") for model in getattr(listed, "data", [])}
+        if model_name not in available_ids:
+            logger.warning(
+                "Ollama is running but model '%s' was not found in the local model list. "
+                "Classification will still be attempted; the model may load on first request.",
+                model_name,
+            )
+    return True
+
+
+def should_classify(skip_classification: bool, llm_settings: Dict[str, Any]) -> Tuple[bool, str]:
+    """Decide whether classification should run and why it would be skipped."""
+    if skip_classification:
+        return False, "--skip-classification was provided"
+
+    provider = llm_settings.get("provider", "ollama")
+    if provider == "ollama":
+        return True, ""
+    if provider == "openai":
+        if os.getenv("OPENAI_API_KEY", "").strip():
+            return True, ""
+        return False, "OPENAI_API_KEY is not set"
+    return False, f"Unknown LLM provider '{provider}'"
+
+
+def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="Import and consolidate bank statements.")
+    parser.add_argument(
+        "--skip-classification",
+        action="store_true",
+        help="Export blank Primary and Secondary columns without using AI services.",
+    )
+    return parser.parse_args(args)
+
+
+def prepare_manual_classification(df: pd.DataFrame) -> pd.DataFrame:
+    """Return processed expenses with blank columns for manual classification."""
+    result = df.copy()
+    result["Primary"] = ""
+    result["Secondary"] = ""
+    return result.sort_values(by=["Day", "Amount", "Expense_name"]).reset_index(drop=True)
 
 
 def get_latest_files(data_dir: str, base_dir: Optional[str] = None) -> Dict[str, str]:
@@ -272,7 +351,7 @@ def save_to_excel(df: pd.DataFrame, output_dir: str, folders_data: List[str]) ->
     logger.info(f"Dataframe saved to Excel file {filename}.")
 
 
-def main() -> None:
+def main(skip_classification: bool = False) -> None:
     """Main function to orchestrate the data import, processing, and export."""
     load_dotenv()
 
@@ -281,12 +360,6 @@ def main() -> None:
 
     # Load the configuration from the YAML file
     config = load_config(config_path="config_bank.yaml")
-    config_llm = load_config(config_path="config_llm.yaml")
-
-    # Initialize API clients
-    openai_client = OpenAI()
-    tavily_client = TavilyClient()
-    search_cache = SearchCache()
 
     # Identify the most recently modified file in each data subfolder to process
     file_data = get_latest_files(data_dir="data")
@@ -336,39 +409,65 @@ def main() -> None:
         # expenses are negative and income/refunds remain positive in the output.
         df["Amount"] = -df["Amount"]
 
-        # Load example expenses to help the classifier if available
-        if latest_example_file is not None:
-            logger.info(f"Loading example file: {latest_example_file}")
-            df_examples = import_data(file_path=latest_example_file)
+        config_llm = None if skip_classification else load_config(config_path="config_llm.yaml")
+        llm_settings = config_llm["llm"] if config_llm is not None else {}
+        classification_enabled, skip_reason = should_classify(skip_classification, llm_settings)
+        provider = llm_settings.get("provider", "ollama")
 
-            # Process df_examples to ensure correct data types
-            df_examples = process_examples(df_examples=df_examples)
+        if classification_enabled and provider == "ollama" and not ollama_is_available(llm_settings):
+            classification_enabled = False
+            skip_reason = "Ollama is not running; start the Ollama app and select qwen3.5:9b-q8_0"
 
-            try:
-                # Validate the example file structure and data types
-                validate_example_structure(df=df, df_examples=df_examples)
-            except ValueError as ve:
-                logger.error(f"Validation failed: {ve}")
-                raise
+        if classification_enabled:
+            assert config_llm is not None
+            llm_client = create_llm_client(llm_settings)
+
+            has_tavily_key = bool(os.getenv("TAVILY_API_KEY", "").strip())
+            tavily_client = TavilyClient() if has_tavily_key else None
+            search_cache = SearchCache() if has_tavily_key else None
+            if not has_tavily_key:
+                logger.warning("TAVILY_API_KEY is not set; online search enrichment is disabled.")
+
+            # Load example expenses to help the classifier if available
+            if latest_example_file is not None:
+                logger.info(f"Loading example file: {latest_example_file}")
+                df_examples = import_data(file_path=latest_example_file)
+
+                # Process df_examples to ensure correct data types
+                df_examples = process_examples(df_examples=df_examples)
+
+                try:
+                    # Validate the example file structure and data types
+                    validate_example_structure(df=df, df_examples=df_examples)
+                except ValueError as ve:
+                    logger.error(f"Validation failed: {ve}")
+                    raise
+            else:
+                logger.warning("No example file found. Classification may be less accurate.")
+                df_examples = pd.DataFrame(columns=df.columns)
+
+            logger.info(f"Classifying expenses with {provider} ({llm_settings['model_name']}).")
+            df = classify_expenses(
+                df=df,
+                df_examples=df_examples,
+                llm_client=llm_client,
+                system_prompt=config_llm["system_prompt"],
+                model_name=llm_settings["model_name"],
+                temperature=llm_settings.get("temperature_base"),
+                include_categories_in_prompt=True,
+                include_online_search=has_tavily_key,
+                max_workers=int(llm_settings.get("max_workers", 10)),
+                tavily_client=tavily_client,
+                search_cache=search_cache,
+                reasoning_effort=llm_settings.get("reasoning_effort"),
+                provider=provider,
+                classification_cache=ClassificationCache(),
+                batch_size=int(llm_settings.get("batch_size", 10)),
+            )
+            logger.info("Classification complete.")
         else:
-            logger.warning("No example file found. Classification may be less accurate.")
-            df_examples = pd.DataFrame(columns=df.columns)
-
-        # Classify the expenses with OpenAI
-        logger.info("Classifying expenses with OpenAI.")
-        df = classify_expenses(
-            df=df,
-            df_examples=df_examples,
-            openai_client=openai_client,
-            system_prompt=config_llm["system_prompt"],
-            model_name=config_llm["llm"]["model_name"],
-            temperature=config_llm["llm"].get("temperature_base"),
-            include_categories_in_prompt=True,
-            include_online_search=True,
-            tavily_client=tavily_client,
-            search_cache=search_cache,
-        )
-        logger.info("Classification complete.")
+            logger.warning(f"{skip_reason}; exporting blank Primary and Secondary columns for manual classification.")
+            df = prepare_manual_classification(df)
 
         # Save the processed data to an Excel file in the output directory
         logger.info("Saving the processed data to an Excel file.")
@@ -376,4 +475,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    cli_args = parse_args()
+    main(skip_classification=cli_args.skip_classification)

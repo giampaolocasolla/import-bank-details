@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from import_bank_details.main import main
-from import_bank_details.structured_output import ExpenseOutput, ExpenseType
+from import_bank_details.structured_output import ExpenseBatchItem, ExpenseOutputBatch, ExpenseType
 
 
 @pytest.fixture
@@ -80,7 +80,7 @@ def e2e_data_dir(tmp_path):
 
     # Create config_llm.yaml
     llm_config = {
-        "llm": {"model_name": "gpt-4o-mini", "temperature_base": 0.0},
+        "llm": {"provider": "openai", "model_name": "gpt-4o-mini", "temperature_base": 0.0},
         "system_prompt": "You are a helpful assistant.",
     }
     with open(tmp_path / "config_llm.yaml", "w") as f:
@@ -120,27 +120,33 @@ def test_full_pipeline(e2e_data_dir):
 
     lock = threading.Lock()
 
-    def mock_classify_func(**kwargs):
+    def mock_batch_func(expenses, **kwargs):
         with lock:
-            name = kwargs["expense_input"]["Expense_name"]
-            for key, etype in expense_types.items():
-                if key in name:
-                    return ExpenseOutput(expense_type=etype)
-            return ExpenseOutput(expense_type=default_type)
+            items = []
+            for expense in expenses:
+                name = expense["Expense_name"]
+                etype = default_type
+                for key, mapped in expense_types.items():
+                    if key in name:
+                        etype = mapped
+                        break
+                items.append(ExpenseBatchItem(id=expense["id"], expense_type=etype))
+            return ExpenseOutputBatch(items=items)
 
     original_cwd = os.getcwd()
     os.chdir(e2e_data_dir)
 
     try:
         with (
-            mock.patch("import_bank_details.classification.get_classification") as mock_classify,
+            mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key", "TAVILY_API_KEY": "test-tavily-key"}),
+            mock.patch("import_bank_details.classification.get_batch_classification") as mock_classify,
             mock.patch("import_bank_details.main.load_dotenv"),
             mock.patch("import_bank_details.main.OpenAI"),
             mock.patch("import_bank_details.main.TavilyClient"),
             mock.patch("import_bank_details.main.SearchCache"),
         ):
 
-            mock_classify.side_effect = mock_classify_func
+            mock_classify.side_effect = mock_batch_func
 
             main()
 
@@ -172,6 +178,44 @@ def test_full_pipeline(e2e_data_dir):
     finally:
         os.chdir(original_cwd)
         # Clean up log handlers
+        import logging
+
+        logger = logging.getLogger()
+        for handler in logger.handlers[:]:
+            if isinstance(handler, logging.FileHandler):
+                handler.close()
+                logger.removeHandler(handler)
+
+
+@pytest.mark.e2e
+def test_full_pipeline_without_openai_key(e2e_data_dir):
+    """The real import/export path should produce manually editable category columns."""
+    original_cwd = os.getcwd()
+    os.chdir(e2e_data_dir)
+
+    try:
+        with (
+            mock.patch.dict(os.environ, {"OPENAI_API_KEY": ""}),
+            mock.patch("import_bank_details.main.load_dotenv"),
+            mock.patch("import_bank_details.main.OpenAI") as mock_openai,
+            mock.patch("import_bank_details.main.TavilyClient") as mock_tavily,
+        ):
+            main()
+
+        mock_openai.assert_not_called()
+        mock_tavily.assert_not_called()
+
+        output_files = os.listdir(e2e_data_dir / "output")
+        assert len(output_files) == 1
+
+        df_result = pd.read_excel(e2e_data_dir / "output" / output_files[0])
+        assert len(df_result) == 5
+        assert df_result["Primary"].isna().all()
+        assert df_result["Secondary"].isna().all()
+        assert df_result["Day"].str.match(r"\d{2}/\d{2}/\d{4}").all()
+    finally:
+        os.chdir(original_cwd)
+
         import logging
 
         logger = logging.getLogger()

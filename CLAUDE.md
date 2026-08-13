@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Python CLI that imports multi-bank CSV/Excel statements, classifies expenses via OpenAI (with optional Tavily search enrichment), and exports to Excel.
+Python CLI that imports multi-bank CSV/Excel statements, classifies expenses via a local Ollama model (or optional OpenAI) with optional Tavily search enrichment, and exports to Excel.
 
 ## Commands
 
@@ -21,7 +21,7 @@ uv run mypy .                          # Type check
 - Line length: 130 (Black + isort + Flake8)
 - mypy: strict (`disallow_untyped_defs`, `warn_return_any`), tests exempted
 - Test coverage: minimum 80%
-- API keys required: `OPENAI_API_KEY`, `TAVILY_API_KEY` (in `.env`)
+- Optional API keys: local Ollama is the default classifier (no key); `OPENAI_API_KEY` enables cloud OpenAI when `llm.provider` is `openai`; `TAVILY_API_KEY` enables search enrichment
 
 ## Documentation
 

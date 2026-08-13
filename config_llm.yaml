@@ -1,5 +1,12 @@
 llm:
-  model_name: "gpt-5-mini"
+  provider: ollama
+  model_name: "qwen3.5:9b-q8_0"
+  base_url: "http://127.0.0.1:11434/v1"
+  api_key: "ollama"
   timeout: 180
+  temperature_base: 0
+  reasoning_effort: "none"
+  max_workers: 2
+  batch_size: 10
 
 system_prompt: "You are an helpful assistant that classifies expenses into categories and subcategories."

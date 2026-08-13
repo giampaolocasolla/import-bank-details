@@ -1,7 +1,7 @@
 import logging
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 from pydantic import BaseModel, field_validator
@@ -58,6 +58,31 @@ class ExpenseOutput(BaseModel):
         if not isinstance(v, ExpenseType):
             raise ValueError("Invalid expense type")
         return v
+
+
+class ExpenseBatchItem(BaseModel):
+    """A single classified expense within a batch response, identified by `id`."""
+
+    id: str
+    expense_type: ExpenseType  # type: ignore
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def coerce_id(cls, v: Any) -> str:
+        return str(v)
+
+    @field_validator("expense_type")
+    @classmethod
+    def validate_expense_type(cls, v: Any) -> Any:
+        if not isinstance(v, ExpenseType):
+            raise ValueError("Invalid expense type")
+        return v
+
+
+class ExpenseOutputBatch(BaseModel):
+    """Structured LLM response containing classifications for a batch of expenses."""
+
+    items: List[ExpenseBatchItem]
 
 
 class ExpenseInput(BaseModel):

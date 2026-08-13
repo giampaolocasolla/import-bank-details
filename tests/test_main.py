@@ -7,14 +7,19 @@ import pandas as pd
 import pytest
 
 from import_bank_details.main import (
+    create_llm_client,
     detect_bank_config,
     get_latest_files,
     import_data,
     main,
+    ollama_is_available,
+    parse_args,
+    prepare_manual_classification,
     process_data,
     process_examples,
     remove_unnecessary_expenses,
     save_to_excel,
+    should_classify,
     validate_example_structure,
 )
 
@@ -379,6 +384,25 @@ def test_save_to_excel(tmpdir):
     assert df_read["Day"].iloc[0] == "01/01/2023"
 
 
+def test_parse_args_skip_classification():
+    """The CLI should expose an explicit manual-classification mode."""
+    args = parse_args(["--skip-classification"])
+
+    assert args.skip_classification is True
+
+
+def test_prepare_manual_classification(sample_processed_df):
+    """Manual mode should add blank category columns without mutating input."""
+    result = prepare_manual_classification(sample_processed_df)
+
+    assert "Primary" not in sample_processed_df.columns
+    assert "Secondary" not in sample_processed_df.columns
+    assert result["Primary"].eq("").all()
+    assert result["Secondary"].eq("").all()
+    assert result.columns[-2:].tolist() == ["Primary", "Secondary"]
+    assert result["Day"].is_monotonic_increasing
+
+
 def test_process_data_does_not_mutate_input(sample_n26_df, sample_config):
     """Test that process_data does not mutate the original DataFrame."""
     original_columns = list(sample_n26_df.columns)
@@ -389,6 +413,290 @@ def test_process_data_does_not_mutate_input(sample_n26_df, sample_config):
     # Original df should not be modified
     assert list(sample_n26_df.columns) == original_columns
     pd.testing.assert_frame_equal(sample_n26_df, original_values)
+
+
+def test_should_classify_ollama_without_openai_key(monkeypatch):
+    """Local Ollama classification does not require a cloud API key."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    enabled, reason = should_classify(False, {"provider": "ollama", "model_name": "qwen3.5:9b-q8_0"})
+
+    assert enabled is True
+    assert reason == ""
+
+
+def test_should_classify_openai_requires_key(monkeypatch):
+    """Cloud OpenAI classification stays opt-in via OPENAI_API_KEY."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    enabled, reason = should_classify(False, {"provider": "openai", "model_name": "gpt-5-mini"})
+
+    assert enabled is False
+    assert reason == "OPENAI_API_KEY is not set"
+
+
+def test_should_classify_unknown_provider():
+    """Unknown providers should skip classification instead of calling a client."""
+    enabled, reason = should_classify(False, {"provider": "groq"})
+
+    assert enabled is False
+    assert "Unknown LLM provider" in reason
+
+
+def test_create_llm_client_ollama():
+    """Ollama should use the local OpenAI-compatible endpoint."""
+    with mock.patch("import_bank_details.main.OpenAI") as mock_openai:
+        create_llm_client(
+            {
+                "provider": "ollama",
+                "base_url": "http://127.0.0.1:11434/v1",
+                "api_key": "ollama",
+                "timeout": 180,
+            }
+        )
+
+    mock_openai.assert_called_once_with(
+        base_url="http://127.0.0.1:11434/v1",
+        api_key="ollama",
+        timeout=180,
+    )
+
+
+def test_ollama_is_available_success():
+    """A successful models.list() probe should report Ollama as available."""
+    with mock.patch("import_bank_details.main.OpenAI") as mock_openai:
+        mock_model = mock.MagicMock()
+        mock_model.id = "qwen3.5:9b-q8_0"
+        mock_openai.return_value.models.list.return_value.data = [mock_model]
+
+        available = ollama_is_available(
+            {
+                "base_url": "http://127.0.0.1:11434/v1",
+                "api_key": "ollama",
+                "model_name": "qwen3.5:9b-q8_0",
+            }
+        )
+
+    assert available is True
+    mock_openai.assert_called_once_with(
+        base_url="http://127.0.0.1:11434/v1",
+        api_key="ollama",
+        timeout=5,
+    )
+
+
+def test_ollama_is_available_missing_model_still_true(caplog):
+    """A missing model name should warn but still attempt classification."""
+    with mock.patch("import_bank_details.main.OpenAI") as mock_openai, caplog.at_level("WARNING"):
+        mock_model = mock.MagicMock()
+        mock_model.id = "other-model"
+        mock_openai.return_value.models.list.return_value.data = [mock_model]
+
+        available = ollama_is_available(
+            {
+                "base_url": "http://127.0.0.1:11434/v1",
+                "api_key": "ollama",
+                "model_name": "qwen3.5:9b-q8_0",
+            }
+        )
+
+    assert available is True
+    assert "qwen3.5:9b-q8_0" in caplog.text
+    assert "was not found" in caplog.text
+
+
+def test_ollama_is_available_connection_failure():
+    """A refused connection should fail the health check immediately."""
+    with mock.patch("import_bank_details.main.OpenAI") as mock_openai:
+        mock_openai.return_value.models.list.side_effect = ConnectionError("Connection refused")
+
+        available = ollama_is_available(
+            {
+                "base_url": "http://127.0.0.1:11434/v1",
+                "api_key": "ollama",
+                "model_name": "qwen3.5:9b-q8_0",
+            }
+        )
+
+    assert available is False
+
+
+def test_main_without_openai_key_exports_for_manual_classification(
+    sample_n26_csv, sample_config, sample_llm_config, monkeypatch, caplog
+):
+    """A missing OpenAI key should export processed rows without initializing API clients."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with (
+        mock.patch("import_bank_details.main.load_config", side_effect=[sample_config, sample_llm_config]) as mock_load_config,
+        mock.patch("import_bank_details.main.setup_logging"),
+        mock.patch("import_bank_details.main.get_latest_files", return_value={"n26": sample_n26_csv}),
+        mock.patch("import_bank_details.main.load_dotenv"),
+        mock.patch("import_bank_details.main.OpenAI") as mock_openai,
+        mock.patch("import_bank_details.main.TavilyClient") as mock_tavily,
+        mock.patch("import_bank_details.main.classify_expenses") as mock_classify,
+        mock.patch("import_bank_details.main.save_to_excel") as mock_save,
+        caplog.at_level("WARNING"),
+    ):
+        main()
+
+    saved_df = mock_save.call_args.args[0]
+    assert saved_df["Primary"].eq("").all()
+    assert saved_df["Secondary"].eq("").all()
+    mock_openai.assert_not_called()
+    mock_tavily.assert_not_called()
+    mock_classify.assert_not_called()
+    assert mock_load_config.call_args_list[0].kwargs["config_path"] == "config_bank.yaml"
+    assert mock_load_config.call_args_list[1].kwargs["config_path"] == "config_llm.yaml"
+    assert "OPENAI_API_KEY is not set" in caplog.text
+
+
+def test_main_ollama_classifies_without_openai_key(sample_n26_csv, sample_config, monkeypatch):
+    """The default local provider should classify without OPENAI_API_KEY."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    ollama_config = {
+        "llm": {
+            "provider": "ollama",
+            "model_name": "qwen3.5:9b-q8_0",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "api_key": "ollama",
+            "timeout": 180,
+            "reasoning_effort": "none",
+            "max_workers": 2,
+        },
+        "system_prompt": "Test",
+    }
+
+    with (
+        mock.patch("import_bank_details.main.load_config", side_effect=[sample_config, ollama_config]),
+        mock.patch("import_bank_details.main.setup_logging"),
+        mock.patch("import_bank_details.main.get_latest_files", return_value={"n26": sample_n26_csv}),
+        mock.patch("import_bank_details.main.load_dotenv"),
+        mock.patch("import_bank_details.main.OpenAI") as mock_openai,
+        mock.patch("import_bank_details.main.TavilyClient") as mock_tavily,
+        mock.patch("import_bank_details.main.classify_expenses") as mock_classify,
+        mock.patch("import_bank_details.main.save_to_excel"),
+    ):
+        mock_model = mock.MagicMock()
+        mock_model.id = "qwen3.5:9b-q8_0"
+        mock_openai.return_value.models.list.return_value.data = [mock_model]
+        mock_classify.return_value = pd.DataFrame(
+            {
+                "Day": pd.to_datetime(["2023-01-01"]),
+                "Expense_name": ["Test"],
+                "Amount": [-10.0],
+                "Bank": ["n26"],
+                "Comment": [""],
+                "Primary": ["Groceries"],
+                "Secondary": ["Auchan"],
+            }
+        )
+        main()
+
+    assert mock_openai.call_count == 2
+    assert mock_openai.call_args_list[0].kwargs["timeout"] == 5
+    assert mock_openai.call_args_list[1].kwargs["timeout"] == 180
+    mock_tavily.assert_not_called()
+    assert mock_classify.call_args.kwargs["model_name"] == "qwen3.5:9b-q8_0"
+    assert mock_classify.call_args.kwargs["reasoning_effort"] == "none"
+    assert mock_classify.call_args.kwargs["max_workers"] == 2
+    assert mock_classify.call_args.kwargs["include_online_search"] is False
+    assert mock_classify.call_args.kwargs["provider"] == "ollama"
+    assert mock_classify.call_args.kwargs["batch_size"] == 10
+    assert mock_classify.call_args.kwargs["classification_cache"] is not None
+
+
+def test_main_ollama_unavailable_exports_blank_columns(sample_n26_csv, sample_config, monkeypatch, caplog):
+    """If Ollama is down, skip classification and export blank columns."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    ollama_config = {
+        "llm": {
+            "provider": "ollama",
+            "model_name": "qwen3.5:9b-q8_0",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "api_key": "ollama",
+            "timeout": 180,
+            "reasoning_effort": "none",
+            "max_workers": 2,
+        },
+        "system_prompt": "Test",
+    }
+
+    with (
+        mock.patch("import_bank_details.main.load_config", side_effect=[sample_config, ollama_config]),
+        mock.patch("import_bank_details.main.setup_logging"),
+        mock.patch("import_bank_details.main.get_latest_files", return_value={"n26": sample_n26_csv}),
+        mock.patch("import_bank_details.main.load_dotenv"),
+        mock.patch("import_bank_details.main.OpenAI") as mock_openai,
+        mock.patch("import_bank_details.main.classify_expenses") as mock_classify,
+        mock.patch("import_bank_details.main.save_to_excel") as mock_save,
+        caplog.at_level("WARNING"),
+    ):
+        mock_openai.return_value.models.list.side_effect = ConnectionError("Connection refused")
+        main()
+
+    saved_df = mock_save.call_args.args[0]
+    assert saved_df["Primary"].eq("").all()
+    assert saved_df["Secondary"].eq("").all()
+    mock_classify.assert_not_called()
+    mock_openai.assert_called_once_with(
+        base_url="http://127.0.0.1:11434/v1",
+        api_key="ollama",
+        timeout=5,
+    )
+    assert "Ollama is not running" in caplog.text
+    assert "qwen3.5:9b-q8_0" in caplog.text
+
+
+def test_main_explicitly_skips_classification_with_openai_key(sample_n26_csv, sample_config, monkeypatch):
+    """The CLI-facing option should override an available OpenAI key."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+
+    with (
+        mock.patch("import_bank_details.main.load_config", return_value=sample_config),
+        mock.patch("import_bank_details.main.setup_logging"),
+        mock.patch("import_bank_details.main.get_latest_files", return_value={"n26": sample_n26_csv}),
+        mock.patch("import_bank_details.main.load_dotenv"),
+        mock.patch("import_bank_details.main.OpenAI") as mock_openai,
+        mock.patch("import_bank_details.main.classify_expenses") as mock_classify,
+        mock.patch("import_bank_details.main.save_to_excel") as mock_save,
+    ):
+        main(skip_classification=True)
+
+    saved_df = mock_save.call_args.args[0]
+    assert saved_df["Primary"].eq("").all()
+    assert saved_df["Secondary"].eq("").all()
+    mock_openai.assert_not_called()
+    mock_classify.assert_not_called()
+
+
+def test_main_classifies_without_tavily_key(sample_n26_csv, sample_config, sample_llm_config, monkeypatch):
+    """Tavily enrichment should be optional when OpenAI classification is enabled."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+
+    with (
+        mock.patch("import_bank_details.main.load_config", side_effect=[sample_config, sample_llm_config]),
+        mock.patch("import_bank_details.main.setup_logging"),
+        mock.patch("import_bank_details.main.get_latest_files", return_value={"n26": sample_n26_csv}),
+        mock.patch("import_bank_details.main.load_dotenv"),
+        mock.patch("import_bank_details.main.OpenAI") as mock_openai,
+        mock.patch("import_bank_details.main.TavilyClient") as mock_tavily,
+        mock.patch("import_bank_details.main.SearchCache") as mock_cache,
+        mock.patch("import_bank_details.main.classify_expenses") as mock_classify,
+        mock.patch("import_bank_details.main.save_to_excel"),
+    ):
+        main()
+
+    mock_openai.assert_called_once()
+    mock_tavily.assert_not_called()
+    mock_cache.assert_not_called()
+    assert mock_classify.call_args.kwargs["include_online_search"] is False
+    assert mock_classify.call_args.kwargs["tavily_client"] is None
+    assert mock_classify.call_args.kwargs["search_cache"] is None
+    assert mock_classify.call_args.kwargs["classification_cache"] is not None
+    assert mock_classify.call_args.kwargs["batch_size"] == 10
 
 
 def test_main_all_banks_fail(sample_data_dir, sample_config):
@@ -406,7 +714,7 @@ def test_main_all_banks_fail(sample_data_dir, sample_config):
         mock_load_config.side_effect = [
             sample_config,
             {
-                "llm": {"model_name": "gpt-4o-mini", "temperature_base": 0.0},
+                "llm": {"provider": "openai", "model_name": "gpt-4o-mini", "temperature_base": 0.0},
                 "system_prompt": "Test",
             },
         ]
@@ -423,6 +731,7 @@ def test_main_all_banks_fail(sample_data_dir, sample_config):
 def test_main_partial_bank_failure(sample_data_dir, sample_n26_csv, sample_config):
     """Test that main continues when some banks fail and warns."""
     with (
+        mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}),
         mock.patch("import_bank_details.main.load_config") as mock_load_config,
         mock.patch("import_bank_details.main.setup_logging"),
         mock.patch("import_bank_details.main.get_latest_files") as mock_get_latest_files,
@@ -436,7 +745,7 @@ def test_main_partial_bank_failure(sample_data_dir, sample_n26_csv, sample_confi
         mock_load_config.side_effect = [
             sample_config,
             {
-                "llm": {"model_name": "gpt-4o-mini", "temperature_base": 0.0},
+                "llm": {"provider": "openai", "model_name": "gpt-4o-mini", "temperature_base": 0.0},
                 "system_prompt": "Test",
             },
         ]
@@ -483,6 +792,7 @@ def test_main_happy_path(
     mock_output = ExpenseOutput(expense_type=expense_type)
 
     with (
+        mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key", "TAVILY_API_KEY": "test-tavily-key"}),
         mock.patch("import_bank_details.main.load_config") as mock_load_config,
         mock.patch("import_bank_details.main.setup_logging"),
         mock.patch("import_bank_details.main.get_latest_files") as mock_get_latest_files,
@@ -542,6 +852,7 @@ def test_main_output_sort_order(
             return ExpenseOutput(expense_type=expense_type_groceries)
 
     with (
+        mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key", "TAVILY_API_KEY": "test-tavily-key"}),
         mock.patch("import_bank_details.main.load_config") as mock_load_config,
         mock.patch("import_bank_details.main.setup_logging"),
         mock.patch("import_bank_details.main.get_latest_files") as mock_get_latest_files,

@@ -147,6 +147,7 @@ def sample_llm_config():
     """Create a sample LLM configuration dict."""
     return {
         "llm": {
+            "provider": "openai",
             "model_name": "gpt-4o-mini",
             "temperature_base": 0.0,
             "temperature_retry": 0.7,
