@@ -65,7 +65,6 @@ def test_main_integration(
         mock.patch("import_bank_details.main.TavilyClient"),
         mock.patch("import_bank_details.main.SearchCache"),
     ):
-
         mock_load_config.side_effect = [sample_config, sample_llm_config]
         mock_get_latest_files.return_value = {
             "n26": sample_n26_csv,
@@ -113,7 +112,6 @@ def test_main_missing_example(
         mock.patch("import_bank_details.main.TavilyClient"),
         mock.patch("import_bank_details.main.SearchCache"),
     ):
-
         mock_load_config.side_effect = [sample_config, sample_llm_config]
         mock_get_latest_files.return_value = {"n26": sample_n26_csv, "revolut": sample_revolut_csv}
 

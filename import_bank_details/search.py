@@ -3,7 +3,6 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Dict, Optional
 
 from tavily import TavilyClient
 
@@ -21,42 +20,42 @@ class SearchCache:
         self.last_request_time: float = 0.0
         self.min_request_interval: float = 0.7
         self._lock = threading.Lock()
-        self._cache: Dict[str, str] = {}
+        self._cache: dict[str, str] = {}
         self._loaded = False
 
-    def get_cache_path(self, custom_path: Optional[Path] = None) -> Path:
+    def get_cache_path(self, custom_path: Path | None = None) -> Path:
         cache_dir = custom_path or Path("data/examples")
         cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir / "search_cache.json"
 
-    def _ensure_loaded(self, cache_path: Optional[Path] = None) -> None:
+    def _ensure_loaded(self, cache_path: Path | None = None) -> None:
         """Lazy-load cache from disk on first access. Must be called under self._lock."""
         if self._loaded:
             return
         path = self.get_cache_path(cache_path)
         if path.exists():
             try:
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     self._cache = json.load(f)
             except json.JSONDecodeError:
                 logger.warning("Cache file corrupted, creating new cache")
                 self._cache = {}
         self._loaded = True
 
-    def get(self, key: str, cache_path: Optional[Path] = None) -> Optional[str]:
+    def get(self, key: str, cache_path: Path | None = None) -> str | None:
         """Return cached value for key, or None if not found."""
         with self._lock:
             self._ensure_loaded(cache_path)
             return self._cache.get(key)
 
-    def put(self, key: str, value: str, cache_path: Optional[Path] = None) -> None:
+    def put(self, key: str, value: str, cache_path: Path | None = None) -> None:
         """Store a value and persist to disk."""
         with self._lock:
             self._ensure_loaded(cache_path)
             self._cache[key] = value
             self._save_to_disk(cache_path)
 
-    def _save_to_disk(self, cache_path: Optional[Path] = None) -> None:
+    def _save_to_disk(self, cache_path: Path | None = None) -> None:
         """Write the in-memory cache to disk. Must be called under self._lock."""
         path = self.get_cache_path(cache_path)
         with open(path, "w", encoding="utf-8") as f:
@@ -76,7 +75,7 @@ def perform_online_search(
     tavily_client: TavilyClient,
     search_cache: SearchCache,
     max_results: int = 2,
-    cache_path: Optional[Path] = None,
+    cache_path: Path | None = None,
 ) -> str:
     """
     Search for expense details using Tavily with caching and rate limiting.

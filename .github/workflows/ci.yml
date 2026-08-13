@@ -30,14 +30,11 @@ jobs:
           # Create a temporary .env file with placeholder values for testing
           echo "OPENAI_API_KEY=dummy-key-for-testing" > .env
 
-      - name: Check code formatting with Black
-        run: uv run black --check .
+      - name: Lint with Ruff
+        run: uv run ruff check .
 
-      - name: Lint with flake8
-        run: uv run flake8 .
-
-      - name: Check imports with isort
-        run: uv run isort --check .
+      - name: Check formatting with Ruff
+        run: uv run ruff format --check .
 
       - name: Type check with mypy
         run: uv run mypy .

@@ -1,7 +1,7 @@
 import logging
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, field_validator
@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_CATEGORIES_PATH = Path(__file__).parent / "categories.yaml"
 
 
-def load_expense_type_enum(categories_path: Optional[Path] = None) -> type:
+def load_expense_type_enum(categories_path: Path | None = None) -> type:
     """Load expense categories from YAML and create the ExpenseType enum.
 
     Args:
@@ -22,10 +22,10 @@ def load_expense_type_enum(categories_path: Optional[Path] = None) -> type:
         A dynamically created Enum class.
     """
     path = categories_path or _DEFAULT_CATEGORIES_PATH
-    with open(path, "r", encoding="utf-8") as f:
-        categories: Dict[str, Any] = yaml.safe_load(f)
+    with open(path, encoding="utf-8") as f:
+        categories: dict[str, Any] = yaml.safe_load(f)
 
-    enum_members: Dict[str, str] = {}
+    enum_members: dict[str, str] = {}
     for category, subcategories in categories.items():
         for subcategory in subcategories:
             enum_member_name = subcategory.upper().replace(" ", "_")
@@ -82,7 +82,7 @@ class ExpenseBatchItem(BaseModel):
 class ExpenseOutputBatch(BaseModel):
     """Structured LLM response containing classifications for a batch of expenses."""
 
-    items: List[ExpenseBatchItem]
+    items: list[ExpenseBatchItem]
 
 
 class ExpenseInput(BaseModel):
@@ -95,4 +95,4 @@ class ExpenseInput(BaseModel):
 
 class ExpenseEntry(BaseModel):
     input: ExpenseInput
-    output: Optional[ExpenseOutput] = None
+    output: ExpenseOutput | None = None

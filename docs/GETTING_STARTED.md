@@ -124,12 +124,11 @@ Minimum 80% coverage required (`pyproject.toml` → `[tool.coverage.report]` →
 
 GitHub Actions runs on every push and PR to `main` (`.github/workflows/ci.yml`):
 
-1. **Black** — code formatting check
-2. **Flake8** — linting
-3. **isort** — import sorting check
-4. **mypy** — static type checking
-5. **pytest** — test suite with coverage (`--cov-fail-under=80`)
-6. **Codecov** — coverage report upload
+1. **Ruff** — linting (`ruff check`, including import sorting)
+2. **Ruff** — formatting check (`ruff format --check`)
+3. **mypy** — static type checking
+4. **pytest** — test suite with coverage (`--cov-fail-under=80`)
+5. **Codecov** — coverage report upload
 
 A separate `pre-commit.yml` workflow verifies pre-commit hooks.
 
@@ -137,9 +136,8 @@ A separate `pre-commit.yml` workflow verifies pre-commit hooks.
 
 | Tool | Setting |
 |---|---|
-| Line length | 130 characters |
-| Black | `line-length = 130` |
-| isort | `profile = "black"`, `line_length = 130` |
-| Flake8 | Config in `.flake8` |
-| mypy | `python_version = "3.11"`, `disallow_untyped_defs = true`, `warn_return_any = true`, `ignore_missing_imports = true` |
+| Line length | 130 characters (Ruff) |
+| Ruff lint | `E`, `W`, `F`, `I`, `UP`, `B`, `SIM`, `PT`, `C4` selected in `pyproject.toml` |
+| Ruff format | `quote-style = "double"`, `line-length = 130` |
+| mypy | Config only in `pyproject.toml`: `python_version = "3.11"`, `disallow_untyped_defs = true`, `warn_return_any = true`, `ignore_missing_imports = true` |
 | mypy (tests) | `disallow_untyped_defs = false` |

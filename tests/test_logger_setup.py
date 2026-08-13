@@ -62,7 +62,7 @@ def test_setup_logging_creates_log_file(tmp_path):
         assert log_files[0].endswith(".log")
 
         # Check the message is in the log file
-        with open(os.path.join(log_dir, log_files[0]), "r") as f:
+        with open(os.path.join(log_dir, log_files[0])) as f:
             log_content = f.read()
             assert test_message in log_content
     finally:

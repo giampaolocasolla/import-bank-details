@@ -145,7 +145,6 @@ def test_full_pipeline(e2e_data_dir):
             mock.patch("import_bank_details.main.TavilyClient"),
             mock.patch("import_bank_details.main.SearchCache"),
         ):
-
             mock_classify.side_effect = mock_batch_func
 
             main()
