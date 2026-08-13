@@ -463,6 +463,7 @@ def main(skip_classification: bool = False) -> None:
                 provider=provider,
                 classification_cache=ClassificationCache(),
                 batch_size=int(llm_settings.get("batch_size", 10)),
+                max_few_shot_examples=int(llm_settings.get("max_few_shot_examples", 32)),
             )
             logger.info("Classification complete.")
         else:

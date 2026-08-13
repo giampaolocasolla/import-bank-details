@@ -151,6 +151,7 @@ def sample_llm_config():
             "temperature_base": 0.0,
             "temperature_retry": 0.7,
             "timeout": 180,
+            "max_few_shot_examples": 32,
         },
         "system_prompt": "You are a helpful assistant that classifies expenses into categories and subcategories.",
     }

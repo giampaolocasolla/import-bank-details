@@ -45,7 +45,7 @@
 
 2. **Process** — `process_data()` selects and renames columns per `config_bank.yaml`, removes unwanted rows (e.g., internal transfers), and parses dates. Bank-specific format detection handles variants like Italian vs English Revolut exports (`detect_bank_config()`).
 
-3. **Classify** — `classify_expenses()` looks up each merchant in `ClassificationCache`, then sends remaining expenses to the configured LLM in batches (`batch_size`, default 10). `ThreadPoolExecutor` parallelizes those batches (default 2 workers for local Ollama). Each batch includes few-shot examples from `data/examples/*.csv` and optionally Tavily search results. The LLM returns a structured `ExpenseOutputBatch` (Pydantic) of `ExpenseType` values — a dynamically generated enum from `categories.yaml`. Missing or invalid batch ids fall back to a single `get_classification` call.
+3. **Classify** — `classify_expenses()` looks up each merchant in `ClassificationCache`, then sends remaining expenses to the configured LLM in batches (`batch_size`, default 10). `ThreadPoolExecutor` parallelizes those batches (default 2 workers for local Ollama). Each batch includes up to `max_few_shot_examples` (default 32) similar labeled examples retrieved from `data/examples/*.csv` by character n-gram TF-IDF on cleaned merchant names, and optionally Tavily search results. The LLM returns a structured `ExpenseOutputBatch` (Pydantic) of `ExpenseType` values — a dynamically generated enum from `categories.yaml`. Missing or invalid batch ids fall back to a single `get_classification` call.
 
 4. **Export** — `save_to_excel()` writes the classified DataFrame to `output/` as an Excel file named `{latest_date}_{banks}.xlsx`.
 
@@ -55,7 +55,7 @@
 Each bank is defined in `config_bank.yaml` with column mappings (`columns_old` → `columns_new`), date format, optional import parameters (e.g., CSV separator), and optional row-removal filters. Adding a new bank requires only a new YAML block — no code changes.
 
 ### Parallel batched classification with ThreadPoolExecutor
-Expenses are classified in batches of `batch_size` (default 10). `max_workers` (default 2) parallelizes those batches, not individual rows. Progress is tracked via `tqdm`. Workers share only the thread-safe search and classification caches.
+Expenses are classified in batches of `batch_size` (default 10). `max_workers` (default 2) parallelizes those batches, not individual rows. Progress is tracked via `tqdm`. Workers share the immutable `ExampleRetriever` plus the thread-safe search and classification caches.
 
 ### Structured outputs via Pydantic + OpenAI-compatible APIs
 Classification results are parsed into `ExpenseOutput` (single-item fallback) or `ExpenseOutputBatch` (batched requests). The configured `provider` selects the API: local Ollama uses Chat Completions with `reasoning_effort: "none"` so Qwen does not spend tokens on thinking; cloud OpenAI uses `openai.responses.parse()`. Both enforce the Pydantic schema.
@@ -74,6 +74,7 @@ Classification results are parsed into `ExpenseOutput` (single-item fallback) or
 |---|---|
 | `main.py` | Pipeline orchestration, file I/O |
 | `classification.py` | LLM interaction, cache lookup, batched classification |
+| `example_retriever.py` | kNN few-shot selection (char n-gram TF-IDF + cosine) |
 | `classification_cache.py` | Merchant-name classification cache |
 | `search.py` | Tavily search, caching, rate limiting |
 | `structured_output.py` | Pydantic models, dynamic enum generation |

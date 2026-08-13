@@ -9,6 +9,7 @@ import-bank-details/
 ├── import_bank_details/       # Main package
 │   ├── main.py                # Pipeline orchestration, file I/O
 │   ├── classification.py      # LLM classification, parallel processing
+│   ├── example_retriever.py   # kNN few-shot example selection
 │   ├── search.py              # Tavily search, caching, rate limiting
 │   ├── structured_output.py   # Pydantic models, dynamic ExpenseType enum
 │   ├── utils.py               # YAML config loading
@@ -31,6 +32,7 @@ import-bank-details/
 |---|---|
 | `main.py` | Entry point; scans `data/`, imports, processes, classifies, exports |
 | `classification.py` | Builds few-shot messages, calls the configured LLM in parallel, returns classified DataFrame |
+| `example_retriever.py` | Retrieves up to N similar labeled examples per batch (char n-gram TF-IDF) |
 | `search.py` | `SearchCache` class and `perform_online_search()` for Tavily lookups |
 | `structured_output.py` | `ExpenseInput`, `ExpenseOutput`, `ExpenseEntry` models; dynamic `ExpenseType` enum |
 | `utils.py` | `load_config()` — generic YAML loader |
@@ -90,6 +92,7 @@ If the bank has multiple export formats (like Revolut EN/IT), add a variant conf
 - **System prompt** — Edit `config_llm.yaml` → `system_prompt`.
 - **Model / provider** — Change `config_llm.yaml` → `llm.provider` (`ollama` or `openai`) and `llm.model_name`.
 - **Few-shot examples** — Add/edit rows in `data/examples/*.csv` (columns: Day, Expense_name, Amount, Bank, Comment, Primary, Secondary).
+- **Few-shot cap** — Change `max_few_shot_examples` in `config_llm.yaml` → `llm` (default 32, hard cap 100). Each batch retrieves the most similar labeled examples instead of sending the full pool.
 - **Manual classification** — Run with `--skip-classification`, set `llm.provider: openai` without `OPENAI_API_KEY`, or run with local Ollama when the Ollama app is not running (the pipeline exports blank columns instead of hanging).
 - **Online search** — Set `TAVILY_API_KEY` to enable search enrichment. Adjust `max_results` in `search.py:perform_online_search()`.
 - **Parallel workers** — Change `max_workers` in `config_llm.yaml` → `llm` (default 2 for local Ollama). Workers parallelize classification batches.
