@@ -55,8 +55,7 @@ def sample_config_file(sample_config, sample_data_dir):
     config_path = os.path.join(sample_data_dir, "test_config.yaml")
     with open(config_path, "w") as f:
         yaml.dump(sample_config, f)
-    yield config_path
-    # Cleanup happens automatically due to the temporary directory
+    return config_path
 
 
 @pytest.fixture

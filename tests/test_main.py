@@ -100,7 +100,7 @@ def test_import_data_with_params(sample_revolut_csv):
 
 def test_import_data_error():
     """Test the import_data function raises an exception for non-existent file."""
-    with pytest.raises(Exception):
+    with pytest.raises(FileNotFoundError):
         import_data(file_path="non_existent_file.csv")
 
 

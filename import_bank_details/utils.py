@@ -1,12 +1,12 @@
 import logging
-from typing import Any, Dict
+from typing import Any
 
 import yaml
 
 logger = logging.getLogger(__name__)
 
 
-def load_config(config_path: str) -> Dict[str, Any]:
+def load_config(config_path: str) -> dict[str, Any]:
     """
     Load the configuration from the YAML file.
 
@@ -21,7 +21,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
         yaml.YAMLError: If the YAML content is invalid.
     """
     try:
-        with open(config_path, "r", encoding="utf-8") as stream:
+        with open(config_path, encoding="utf-8") as stream:
             config = yaml.safe_load(stream)
             logger.info("Configuration file loaded successfully.")
             return config  # type: ignore[no-any-return]

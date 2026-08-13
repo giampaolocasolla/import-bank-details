@@ -2,7 +2,7 @@ import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional, Set, Tuple, Type, cast
+from typing import Any, cast
 
 import pandas as pd
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
@@ -45,7 +45,7 @@ def _is_transient_error(exc: BaseException) -> bool:
 
 def _parse_structured(
     llm_client: OpenAI,
-    parse_kwargs: Dict[str, Any],
+    parse_kwargs: dict[str, Any],
     use_chat_completions: bool,
 ) -> BaseModel:
     """Call the provider parse API with shared retry/fail-fast behavior."""
@@ -82,13 +82,13 @@ def _parse_structured(
     raise RuntimeError("Unexpected: retry loop exited without return or raise")
 
 
-def _split_expense_type(expense_type: Any) -> Tuple[str, str]:
+def _split_expense_type(expense_type: Any) -> tuple[str, str]:
     """Return (primary, secondary) from an ExpenseType enum member."""
     primary, secondary = expense_type.value.split(", ", 1)
     return primary, secondary
 
 
-def _expense_result(expense_input: ExpenseInput, primary: Optional[str], secondary: Optional[str]) -> Dict[str, Any]:
+def _expense_result(expense_input: ExpenseInput, primary: str | None, secondary: str | None) -> dict[str, Any]:
     return {
         **expense_input.model_dump(),
         "Primary": primary,
@@ -104,7 +104,7 @@ def _parse_amount(amount_str: str, expense_input: ExpenseInput) -> float:
         return 0.0
 
 
-def get_list_expenses(df: pd.DataFrame, include_output: bool = True) -> List[ExpenseEntry]:
+def get_list_expenses(df: pd.DataFrame, include_output: bool = True) -> list[ExpenseEntry]:
     """
     Convert a DataFrame of expenses into a list of ExpenseEntry instances.
 
@@ -119,7 +119,7 @@ def get_list_expenses(df: pd.DataFrame, include_output: bool = True) -> List[Exp
     Returns:
         List[ExpenseEntry]: A list of ExpenseEntry instances.
     """
-    expenses: List[ExpenseEntry] = []
+    expenses: list[ExpenseEntry] = []
     for _, row in df.iterrows():
         expense_input = ExpenseInput(
             Day=(row["Day"].strftime("%d/%m/%Y") if pd.notnull(row["Day"]) else ""),
@@ -146,7 +146,7 @@ def get_list_expenses(df: pd.DataFrame, include_output: bool = True) -> List[Exp
     return expenses
 
 
-def create_nested_category_string(response_format: Type[BaseModel]) -> str:
+def create_nested_category_string(response_format: type[BaseModel]) -> str:
     """
     Generates a nested list of primary and secondary categories from the BaseModel's schema.
 
@@ -160,7 +160,7 @@ def create_nested_category_string(response_format: Type[BaseModel]) -> str:
     enum_list = schema["$defs"]["ExpenseType"]["enum"]
 
     # Build a dictionary mapping primary categories to their secondary categories
-    category_dict: Dict[str, Set[str]] = {}
+    category_dict: dict[str, set[str]] = {}
     for item in enum_list:
         primary, secondary = item.split(", ")
         category_dict.setdefault(primary, set()).add(secondary)
@@ -177,18 +177,18 @@ def create_nested_category_string(response_format: Type[BaseModel]) -> str:
 
 
 def get_classification(
-    expense_input: Dict[str, str],
+    expense_input: dict[str, str],
     llm_client: OpenAI,
-    examples: Optional[List[Dict[str, Any]]] = None,
+    examples: list[dict[str, Any]] | None = None,
     system_prompt: str = "",
     model_name: str = "gpt-5-mini",
-    temperature: Optional[float] = None,
-    response_format: Type[ExpenseOutput] = ExpenseOutput,
+    temperature: float | None = None,
+    response_format: type[ExpenseOutput] = ExpenseOutput,
     include_categories_in_prompt: bool = False,
     include_online_search: bool = False,
-    tavily_client: Optional[TavilyClient] = None,
-    search_cache: Optional[SearchCache] = None,
-    reasoning_effort: Optional[str] = None,
+    tavily_client: TavilyClient | None = None,
+    search_cache: SearchCache | None = None,
+    reasoning_effort: str | None = None,
     provider: str = "ollama",
 ) -> ExpenseOutput:
     """
@@ -222,7 +222,7 @@ def get_classification(
     if examples is None:
         examples = []
 
-    input_messages: List[Dict[str, str]] = []
+    input_messages: list[dict[str, str]] = []
 
     for example in examples:
         input_messages.extend(
@@ -242,7 +242,7 @@ def get_classification(
 
     input_messages.append({"role": "user", "content": user_message_content})
 
-    parse_kwargs: Dict[str, Any] = {"model": model_name}
+    parse_kwargs: dict[str, Any] = {"model": model_name}
     if temperature is not None:
         parse_kwargs["temperature"] = temperature
 
@@ -260,17 +260,17 @@ def get_classification(
 
 
 def get_batch_classification(
-    expenses: List[Dict[str, str]],
+    expenses: list[dict[str, str]],
     llm_client: OpenAI,
-    examples: Optional[List[Dict[str, Any]]] = None,
+    examples: list[dict[str, Any]] | None = None,
     system_prompt: str = "",
     model_name: str = "gpt-5-mini",
-    temperature: Optional[float] = None,
+    temperature: float | None = None,
     include_categories_in_prompt: bool = False,
     include_online_search: bool = False,
-    tavily_client: Optional[TavilyClient] = None,
-    search_cache: Optional[SearchCache] = None,
-    reasoning_effort: Optional[str] = None,
+    tavily_client: TavilyClient | None = None,
+    search_cache: SearchCache | None = None,
+    reasoning_effort: str | None = None,
     provider: str = "ollama",
 ) -> ExpenseOutputBatch:
     """Classify a batch of expenses in a single structured LLM call.
@@ -289,7 +289,7 @@ def get_batch_classification(
     if examples is None:
         examples = []
 
-    input_messages: List[Dict[str, str]] = []
+    input_messages: list[dict[str, str]] = []
     for example_index, example in enumerate(examples):
         example_id = f"ex{example_index}"
         input_messages.extend(
@@ -305,7 +305,7 @@ def get_batch_classification(
             ]
         )
 
-    payload_items: List[Dict[str, str]] = []
+    payload_items: list[dict[str, str]] = []
     for expense in expenses:
         item = dict(expense)
         if include_online_search and tavily_client is not None and search_cache is not None:
@@ -317,7 +317,7 @@ def get_batch_classification(
 
     input_messages.append({"role": "user", "content": json.dumps({"expenses": payload_items})})
 
-    parse_kwargs: Dict[str, Any] = {"model": model_name}
+    parse_kwargs: dict[str, Any] = {"model": model_name}
     if temperature is not None:
         parse_kwargs["temperature"] = temperature
 
@@ -337,19 +337,19 @@ def get_batch_classification(
 def _classify_single_expense(
     expense_entry: ExpenseEntry,
     llm_client: OpenAI,
-    examples: List[Dict[str, Any]],
+    examples: list[dict[str, Any]],
     system_prompt: str,
     model_name: str,
-    temperature: Optional[float],
-    response_format: Type[ExpenseOutput],
+    temperature: float | None,
+    response_format: type[ExpenseOutput],
     include_categories_in_prompt: bool,
     include_online_search: bool,
-    tavily_client: Optional[TavilyClient] = None,
-    search_cache: Optional[SearchCache] = None,
-    reasoning_effort: Optional[str] = None,
+    tavily_client: TavilyClient | None = None,
+    search_cache: SearchCache | None = None,
+    reasoning_effort: str | None = None,
     provider: str = "ollama",
-    classification_cache: Optional[ClassificationCache] = None,
-) -> Dict[str, Any]:
+    classification_cache: ClassificationCache | None = None,
+) -> dict[str, Any]:
     """
     Classify a single expense entry.
 
@@ -399,24 +399,24 @@ def _classify_single_expense(
 
 
 def _classify_expense_batch(
-    batch: List[Tuple[int, ExpenseEntry]],
+    batch: list[tuple[int, ExpenseEntry]],
     llm_client: OpenAI,
-    examples: List[Dict[str, Any]],
+    examples: list[dict[str, Any]],
     system_prompt: str,
     model_name: str,
-    temperature: Optional[float],
-    response_format: Type[ExpenseOutput],
+    temperature: float | None,
+    response_format: type[ExpenseOutput],
     include_categories_in_prompt: bool,
     include_online_search: bool,
-    tavily_client: Optional[TavilyClient],
-    search_cache: Optional[SearchCache],
-    reasoning_effort: Optional[str],
+    tavily_client: TavilyClient | None,
+    search_cache: SearchCache | None,
+    reasoning_effort: str | None,
     provider: str,
     classification_cache: ClassificationCache,
-) -> List[Tuple[int, Dict[str, Any]]]:
+) -> list[tuple[int, dict[str, Any]]]:
     """Classify a batch of expenses in one LLM call, falling back per row on missing/invalid ids."""
-    payload: List[Dict[str, str]] = []
-    id_to_index_entry: Dict[str, Tuple[int, ExpenseEntry]] = {}
+    payload: list[dict[str, str]] = []
+    id_to_index_entry: dict[str, tuple[int, ExpenseEntry]] = {}
     for local_id, (orig_idx, entry) in enumerate(batch):
         item_id = str(local_id)
         payload_item = entry.input.model_dump()
@@ -424,7 +424,7 @@ def _classify_expense_batch(
         payload.append(payload_item)
         id_to_index_entry[item_id] = (orig_idx, entry)
 
-    def fallback_single(orig_idx: int, entry: ExpenseEntry) -> Tuple[int, Dict[str, Any]]:
+    def fallback_single(orig_idx: int, entry: ExpenseEntry) -> tuple[int, dict[str, Any]]:
         return orig_idx, _classify_single_expense(
             entry,
             llm_client,
@@ -461,12 +461,12 @@ def _classify_expense_batch(
         logger.error(f"Batch classification failed ({len(batch)} expenses): {e}")
         return [fallback_single(orig_idx, entry) for orig_idx, entry in batch]
 
-    returned_by_id: Dict[str, Any] = {}
+    returned_by_id: dict[str, Any] = {}
     for item in batch_output.items:
         if item.id in id_to_index_entry and item.id not in returned_by_id:
             returned_by_id[item.id] = item.expense_type
 
-    results: List[Tuple[int, Dict[str, Any]]] = []
+    results: list[tuple[int, dict[str, Any]]] = []
     for item_id, (orig_idx, entry) in id_to_index_entry.items():
         expense_type = returned_by_id.get(item_id)
         if expense_type is None:
@@ -485,16 +485,16 @@ def classify_expenses(
     llm_client: OpenAI,
     system_prompt: str = "",
     model_name: str = "gpt-5-mini",
-    temperature: Optional[float] = None,
-    response_format: Type[ExpenseOutput] = ExpenseOutput,
+    temperature: float | None = None,
+    response_format: type[ExpenseOutput] = ExpenseOutput,
     include_categories_in_prompt: bool = False,
     include_online_search: bool = False,
     max_workers: int = 2,
-    tavily_client: Optional[TavilyClient] = None,
-    search_cache: Optional[SearchCache] = None,
-    reasoning_effort: Optional[str] = None,
+    tavily_client: TavilyClient | None = None,
+    search_cache: SearchCache | None = None,
+    reasoning_effort: str | None = None,
     provider: str = "ollama",
-    classification_cache: Optional[ClassificationCache] = None,
+    classification_cache: ClassificationCache | None = None,
     batch_size: int = 10,
 ) -> pd.DataFrame:
     """
@@ -545,8 +545,8 @@ def classify_expenses(
     ]
     logger.debug(f"Got {len(examples)} example expenses")
 
-    results: List[Optional[Dict[str, Any]]] = [None] * len(expenses)
-    to_classify: List[Tuple[int, ExpenseEntry]] = []
+    results: list[dict[str, Any] | None] = [None] * len(expenses)
+    to_classify: list[tuple[int, ExpenseEntry]] = []
 
     for index, expense_entry in enumerate(expenses):
         expense_input = expense_entry.input

@@ -21,22 +21,42 @@ dev-dependencies = [
     "ipykernel>=6.29.5",
     "nbformat>=5.10.4",
     "pytest>=8.2.0",
-    "black>=24.4.2",
-    "flake8>=3.9.2",
-    "isort>=5.10.1",
     "mypy>=1.2.0",
     "pre-commit>=3.0.0",
     "types-pyyaml>=6.0.12.20240917",
     "pytest-cov>=6.1.1",
+    "ruff>=0.16.2",
 ]
 
-[tool.isort]
-profile = "black"
-line_length = 130
-skip_gitignore = true
-
-[tool.black]
+[tool.ruff]
 line-length = 130
+target-version = "py311"
+src = ["import_bank_details", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors (flake8)
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes (flake8)
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "PT",  # flake8-pytest-style
+    "C4",  # flake8-comprehensions
+]
+ignore = [
+    "E501",  # line length: formatter owns wrapping
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["import_bank_details"]
+
+[tool.ruff.format]
+quote-style = "double"
 
 [tool.mypy]
 python_version = "3.11"

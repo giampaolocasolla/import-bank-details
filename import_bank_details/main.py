@@ -2,7 +2,7 @@ import argparse
 import glob
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -24,7 +24,7 @@ DEFAULT_OLLAMA_API_KEY = "ollama"
 OLLAMA_HEALTH_CHECK_TIMEOUT = 5
 
 
-def create_llm_client(llm_settings: Dict[str, Any]) -> OpenAI:
+def create_llm_client(llm_settings: dict[str, Any]) -> OpenAI:
     """Create an OpenAI-compatible client for the configured provider."""
     provider = llm_settings.get("provider", "ollama")
     timeout = llm_settings.get("timeout", 180)
@@ -37,7 +37,7 @@ def create_llm_client(llm_settings: Dict[str, Any]) -> OpenAI:
     return OpenAI(timeout=timeout)
 
 
-def ollama_is_available(llm_settings: Dict[str, Any]) -> bool:
+def ollama_is_available(llm_settings: dict[str, Any]) -> bool:
     """Return True if the local Ollama server responds to a short models.list() probe."""
     try:
         client = OpenAI(
@@ -62,7 +62,7 @@ def ollama_is_available(llm_settings: Dict[str, Any]) -> bool:
     return True
 
 
-def should_classify(skip_classification: bool, llm_settings: Dict[str, Any]) -> Tuple[bool, str]:
+def should_classify(skip_classification: bool, llm_settings: dict[str, Any]) -> tuple[bool, str]:
     """Decide whether classification should run and why it would be skipped."""
     if skip_classification:
         return False, "--skip-classification was provided"
@@ -77,7 +77,7 @@ def should_classify(skip_classification: bool, llm_settings: Dict[str, Any]) -> 
     return False, f"Unknown LLM provider '{provider}'"
 
 
-def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
+def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Import and consolidate bank statements.")
     parser.add_argument(
@@ -96,7 +96,7 @@ def prepare_manual_classification(df: pd.DataFrame) -> pd.DataFrame:
     return result.sort_values(by=["Day", "Amount", "Expense_name"]).reset_index(drop=True)
 
 
-def get_latest_files(data_dir: str, base_dir: Optional[str] = None) -> Dict[str, str]:
+def get_latest_files(data_dir: str, base_dir: str | None = None) -> dict[str, str]:
     """
     Identify the most recently modified file in each data subfolder to process.
 
@@ -109,7 +109,7 @@ def get_latest_files(data_dir: str, base_dir: Optional[str] = None) -> Dict[str,
     """
     cwd = base_dir or os.getcwd()
     folders_data = [folder for folder in os.listdir(data_dir) if not folder.startswith(".")]
-    file_data: Dict[str, str] = {}
+    file_data: dict[str, str] = {}
     for folder in folders_data:
         folder_path = os.path.join(cwd, data_dir, folder)
         if folder == "examples":
@@ -130,7 +130,7 @@ def get_latest_files(data_dir: str, base_dir: Optional[str] = None) -> Dict[str,
     return file_data
 
 
-def detect_bank_config(file_path: str, bank_name: str, config: Dict) -> str:
+def detect_bank_config(file_path: str, bank_name: str, config: dict) -> str:
     """
     Detect the correct bank configuration based on CSV file headers.
 
@@ -168,7 +168,7 @@ def detect_bank_config(file_path: str, bank_name: str, config: Dict) -> str:
         return bank_name
 
 
-def import_data(file_path: str, import_params: Optional[Dict] = None) -> pd.DataFrame:
+def import_data(file_path: str, import_params: dict | None = None) -> pd.DataFrame:
     """
     Import data from a file with specified parameters.
 
@@ -195,7 +195,7 @@ def import_data(file_path: str, import_params: Optional[Dict] = None) -> pd.Data
     return df
 
 
-def process_data(df: pd.DataFrame, config: Dict, bank_name: str) -> pd.DataFrame:
+def process_data(df: pd.DataFrame, config: dict, bank_name: str) -> pd.DataFrame:
     """
     Process and clean the data according to the configuration.
 
@@ -216,7 +216,7 @@ def process_data(df: pd.DataFrame, config: Dict, bank_name: str) -> pd.DataFrame
 
     # Select and rename columns as per the new configuration mapping
     df = df[config["columns_old"]]
-    df = df.rename(columns=dict(zip(config["columns_old"], config["columns_new"])))
+    df = df.rename(columns=dict(zip(config["columns_old"], config["columns_new"], strict=True)))
     logger.debug(f"Columns selected and renamed for {bank_name}.")
 
     # Call remove_unnecessary_expenses if the 'Remove' key exists in config
@@ -261,7 +261,7 @@ def process_examples(df_examples: pd.DataFrame) -> pd.DataFrame:
     return df_examples
 
 
-def remove_unnecessary_expenses(df: pd.DataFrame, remove_criteria: List[str]) -> pd.DataFrame:
+def remove_unnecessary_expenses(df: pd.DataFrame, remove_criteria: list[str]) -> pd.DataFrame:
     """
     Adjust the dataframe by removing rows based on 'remove_criteria' in 'Expense_name' column,
     replacing NaN values with an empty string to avoid TypeError with bitwise NOT operator.
@@ -318,7 +318,7 @@ def validate_example_structure(df: pd.DataFrame, df_examples: pd.DataFrame) -> N
     if dtype_mismatch:
         mismatch_details = ", ".join(
             [
-                f"'{col}': data dtype is {details['data_dtype']}, " f"but example dtype is {details['example_dtype']}"
+                f"'{col}': data dtype is {details['data_dtype']}, but example dtype is {details['example_dtype']}"
                 for col, details in dtype_mismatch.items()
             ]
         )
@@ -331,7 +331,7 @@ def validate_example_structure(df: pd.DataFrame, df_examples: pd.DataFrame) -> N
     logger.info("Example file structure and data types are valid.")
 
 
-def save_to_excel(df: pd.DataFrame, output_dir: str, folders_data: List[str]) -> None:
+def save_to_excel(df: pd.DataFrame, output_dir: str, folders_data: list[str]) -> None:
     """
     Save the processed data to an Excel file in the output directory.
 
@@ -369,7 +369,7 @@ def main(skip_classification: bool = False) -> None:
 
     # Initialize the dataframe that will hold all the data
     df = None
-    errors: Dict[str, str] = {}
+    errors: dict[str, str] = {}
 
     # Iterate through each file, process and clean the data according to the configuration
     for bank_name, file_path in file_data.items():
