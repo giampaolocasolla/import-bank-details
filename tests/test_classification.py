@@ -740,3 +740,50 @@ def test_classify_expenses_batch_failure_falls_back_to_single(isolated_cache):
     assert mock_get_classification.call_count == 2
     assert (result_df["Primary"] == "Groceries").all()
     assert isolated_cache.get("Supermarket") == {"Primary": "Groceries", "Secondary": "Auchan"}
+
+
+def test_classify_expenses_does_not_send_full_example_pool(isolated_cache):
+    """A large labeled pool should be capped before the mocked LLM call."""
+    n_examples = 50
+    df_examples = pd.DataFrame(
+        {
+            "Day": pd.to_datetime(["2023-01-01"] * n_examples),
+            "Expense_name": [f"Merchant{i:03d} Store" for i in range(n_examples)],
+            "Amount": [10.0] * n_examples,
+            "Bank": ["N26"] * n_examples,
+            "Comment": [""] * n_examples,
+            "Primary": ["Groceries"] * n_examples,
+            "Secondary": ["Lidl"] * n_examples,
+        }
+    )
+    df = pd.DataFrame(
+        {
+            "Day": pd.to_datetime(["2023-02-01"]),
+            "Expense_name": ["Merchant000 Store Munich"],
+            "Amount": [12.0],
+            "Bank": ["N26"],
+            "Comment": [""],
+        }
+    )
+    batch_output = ExpenseOutputBatch(items=[ExpenseBatchItem(id="0", expense_type=_find_expense_type("Groceries, Lidl"))])
+    mock_openai_client = MagicMock()
+    mock_openai_client.chat.completions.parse.return_value = _mock_chat_response(batch_output)
+
+    classify_expenses(
+        df=df,
+        df_examples=df_examples,
+        llm_client=mock_openai_client,
+        system_prompt="Test prompt",
+        model_name="qwen3.5:9b-q8_0",
+        provider="ollama",
+        classification_cache=isolated_cache,
+        batch_size=10,
+        max_few_shot_examples=5,
+        max_workers=1,
+    )
+
+    messages = mock_openai_client.chat.completions.parse.call_args.kwargs["messages"]
+    example_messages = messages[1:-1]
+    assert len(example_messages) == 10
+    assert example_messages[0]["role"] == "user"
+    assert example_messages[1]["role"] == "assistant"

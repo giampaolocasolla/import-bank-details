@@ -94,13 +94,13 @@ output: Optional[ExpenseOutput]   # None before classification
 
 ## Classification Pipeline
 
-1. **Build few-shot examples** — Convert `data/examples/*.csv` rows into `ExpenseEntry` objects with known outputs, then serialize as `{"input": {...}, "output": "Primary, Secondary"}` pairs.
+1. **Build and retrieve few-shot examples** — Convert `data/examples/*.csv` rows into `ExpenseEntry` objects with known outputs, then serialize as `{"input": {...}, "output": "Primary, Secondary"}` pairs. `ExampleRetriever` indexes those pairs once (character n-gram TF-IDF on cleaned merchant names plus comment) and, per batch, selects at most `max_few_shot_examples` (default 32, hard cap 100) most similar examples. The full pool is not dumped into every LLM call.
 
 2. **Skip negatives and apply cache** — Negative amounts (income/refunds) skip classification. Remaining merchants are looked up in `ClassificationCache` (keyed by cleaned expense name). Hits reuse stored Primary/Secondary values and skip the LLM.
 
 3. **Optional search enrichment** — If `include_online_search=True`, call `perform_online_search()` which queries Tavily for the expense name (with a Germany country filter, falling back without), caches results, and attaches them per expense in the batch user message.
 
-4. **Batched LLM call** — Remaining expenses are sent in chunks of `batch_size` (default 10). Each batch is one structured call: system prompt (from `config_llm.yaml`) + optional category list + few-shot messages + all items. `provider` selects the API: local Ollama uses Chat Completions with `reasoning_effort: "none"`; cloud OpenAI uses `openai.responses.parse()`. The response is constrained to `ExpenseOutputBatch`. `max_workers` parallelizes batches, not rows.
+4. **Batched LLM call** — Remaining expenses are sent in chunks of `batch_size` (default 10). Each batch is one structured call: system prompt (from `config_llm.yaml`) + optional category list + retrieved few-shot messages + all items. `provider` selects the API: local Ollama uses Chat Completions with `reasoning_effort: "none"`; cloud OpenAI uses `openai.responses.parse()`. The response is constrained to `ExpenseOutputBatch`. `max_workers` parallelizes batches, not rows.
 
 5. **Validation and fallback** — Pydantic validates each returned `expense_type`. If an id is missing or the batch call fails, that expense is retried via `get_classification` (`ExpenseOutput`). If that also fails, Primary/Secondary stay None.
 
@@ -121,6 +121,7 @@ llm:
   reasoning_effort: "none"
   max_workers: 2
   batch_size: 10
+  max_few_shot_examples: 32
 
 system_prompt: "You are an helpful assistant that classifies expenses into categories and subcategories."
 ```

@@ -8,5 +8,6 @@ llm:
   reasoning_effort: "none"
   max_workers: 2
   batch_size: 10
+  max_few_shot_examples: 32
 
 system_prompt: "You are an helpful assistant that classifies expenses into categories and subcategories."

@@ -12,6 +12,7 @@ from tqdm import tqdm
 from tqdm.contrib.logging import tqdm_logging_redirect
 
 from import_bank_details.classification_cache import ClassificationCache
+from import_bank_details.example_retriever import ExampleRetriever
 from import_bank_details.search import SearchCache, perform_online_search
 from import_bank_details.structured_output import ExpenseEntry, ExpenseInput, ExpenseOutput, ExpenseOutputBatch, ExpenseType
 
@@ -337,7 +338,7 @@ def get_batch_classification(
 def _classify_single_expense(
     expense_entry: ExpenseEntry,
     llm_client: OpenAI,
-    examples: list[dict[str, Any]],
+    retriever: ExampleRetriever,
     system_prompt: str,
     model_name: str,
     temperature: float | None,
@@ -355,7 +356,7 @@ def _classify_single_expense(
 
     Args:
         expense_entry (ExpenseEntry): The expense entry to classify.
-        examples (List[Dict[str, Any]]): List of example classifications.
+        retriever (ExampleRetriever): Selects few-shot examples for this expense only.
         system_prompt (str): The system prompt to use.
         model_name (str): The name of the model to use.
         temperature (Optional[float]): The temperature setting. Not supported by all models.
@@ -374,6 +375,7 @@ def _classify_single_expense(
         logger.debug("Skipping classification for negative amount")
         return _expense_result(expense_input, None, None)
 
+    examples = retriever.retrieve_for_batch([expense_input.model_dump()])
     try:
         expense_output = get_classification(
             expense_input=expense_input.model_dump(),
@@ -401,7 +403,7 @@ def _classify_single_expense(
 def _classify_expense_batch(
     batch: list[tuple[int, ExpenseEntry]],
     llm_client: OpenAI,
-    examples: list[dict[str, Any]],
+    retriever: ExampleRetriever,
     system_prompt: str,
     model_name: str,
     temperature: float | None,
@@ -424,11 +426,14 @@ def _classify_expense_batch(
         payload.append(payload_item)
         id_to_index_entry[item_id] = (orig_idx, entry)
 
+    examples = retriever.retrieve_for_batch([entry.input.model_dump() for _, entry in batch])
+    logger.debug(f"Selected {len(examples)} few-shot examples for batch of {len(batch)}")
+
     def fallback_single(orig_idx: int, entry: ExpenseEntry) -> tuple[int, dict[str, Any]]:
         return orig_idx, _classify_single_expense(
             entry,
             llm_client,
-            examples,
+            retriever,
             system_prompt,
             model_name,
             temperature,
@@ -496,13 +501,15 @@ def classify_expenses(
     provider: str = "ollama",
     classification_cache: ClassificationCache | None = None,
     batch_size: int = 10,
+    max_few_shot_examples: int = 32,
 ) -> pd.DataFrame:
     """
     Classify expenses in the given DataFrame using example data and an LLM.
 
     Negative amounts are skipped. Cache hits reuse stored Primary/Secondary values.
     Remaining expenses are classified in batches of ``batch_size``; ``max_workers``
-    parallelizes those batches.
+    parallelizes those batches. Each batch includes at most ``max_few_shot_examples``
+    similar labeled examples.
 
     Args:
         df (pd.DataFrame): The DataFrame containing expenses to be classified.
@@ -515,6 +522,7 @@ def classify_expenses(
         include_categories_in_prompt (bool, optional): If True, appends the category list to the system prompt.
         include_online_search (bool, optional): If True, appends online search results to the user's message.
         max_workers (int, optional): The maximum number of workers for parallel batch processing. Defaults to 2.
+        max_few_shot_examples (int, optional): Max similar examples per LLM call. Defaults to 32 (hard cap 100).
 
     Returns:
         pd.DataFrame: A new DataFrame containing the original expense data along with
@@ -544,6 +552,7 @@ def classify_expenses(
         if ex.output is not None
     ]
     logger.debug(f"Got {len(examples)} example expenses")
+    retriever = ExampleRetriever(examples, max_few_shot_examples)
 
     results: list[dict[str, Any] | None] = [None] * len(expenses)
     to_classify: list[tuple[int, ExpenseEntry]] = []
@@ -573,7 +582,7 @@ def classify_expenses(
                     _classify_expense_batch,
                     batch,
                     llm_client,
-                    examples,
+                    retriever,
                     system_prompt,
                     model_name,
                     temperature,

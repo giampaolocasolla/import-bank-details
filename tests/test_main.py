@@ -604,6 +604,7 @@ def test_main_ollama_classifies_without_openai_key(sample_n26_csv, sample_config
     assert mock_classify.call_args.kwargs["include_online_search"] is False
     assert mock_classify.call_args.kwargs["provider"] == "ollama"
     assert mock_classify.call_args.kwargs["batch_size"] == 10
+    assert mock_classify.call_args.kwargs["max_few_shot_examples"] == 32
     assert mock_classify.call_args.kwargs["classification_cache"] is not None
 
 
@@ -697,6 +698,7 @@ def test_main_classifies_without_tavily_key(sample_n26_csv, sample_config, sampl
     assert mock_classify.call_args.kwargs["search_cache"] is None
     assert mock_classify.call_args.kwargs["classification_cache"] is not None
     assert mock_classify.call_args.kwargs["batch_size"] == 10
+    assert mock_classify.call_args.kwargs["max_few_shot_examples"] == 32
 
 
 def test_main_all_banks_fail(sample_data_dir, sample_config):
